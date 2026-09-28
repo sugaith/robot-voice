@@ -1,7 +1,7 @@
 {
   "name": "robot-voice",
   "displayName": "Robot Voice",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Speaks Claude's replies out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot to control and replay them.",
   "author": {
     "name": "Sugaith"

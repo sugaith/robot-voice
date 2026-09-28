@@ -171,6 +171,16 @@ class Hermes(Base):
         self.assertEqual(hermes.on_command("repeat show all"), "First. Then more.")
 
 
+class Cli(Base):
+    def test_agent_flags_pick_session_and_detach(self):
+        engine.handle_reply("From pi. Anything else?", "pi-7")
+        engine.handle_reply("From somewhere else.", "other")
+        res = subprocess.run([sys.executable, "-m", "robot_voice", "--detach", "--session",
+                              "pi-7", "repeat", "show"], cwd=ROOT, capture_output=True,
+                             text=True)
+        self.assertEqual(res.stdout.strip(), "From pi. Anything else?", res.stderr)
+
+
 class Repeat(Base):
     def test_numbered_history(self):
         for text in ("One.", "Two.", "Three."):

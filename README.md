@@ -12,6 +12,7 @@ anything already said.
 |---|---|---|
 | **Claude Code** | plugin: `Stop` hook | answered by a hook, no model turn |
 | **Hermes Agent** | plugin: `post_llm_call` hook | native slash command, no model turn |
+| **pi** | package: `agent_end` + `agent_settled` | native slash command, no model turn |
 | anything else | `robot-voice` CLI | `robot-voice <command>` |
 
 One repo is both plugins. Config and voices live once in `~/.robot-voice/`,
@@ -82,6 +83,19 @@ Hermes reads the key from `GEMINI_API_KEY` or `GOOGLE_API_KEY` in
 turns from the CLI and TUI only: a Telegram message handled by a gateway on the
 same machine stays silent (`hermes_platforms` in the config). Don't combine it
 with Hermes' own `/voice tts`, or every reply is spoken twice.
+
+### pi
+
+```bash
+pi install git:github.com/sugaith/robot-voice
+```
+
+or `pi install ./robot-voice` from a clone, which loads it in place. The
+package is `pi/extension.ts`, declared in `package.json`. It remembers the
+reply at `agent_end` and speaks it at `agent_settled`, once pi won't continue
+on its own, in the interactive TUI only, so `pi -p` scripts stay quiet.
+`/robot <command>` shows its answer as a notification. The key comes from the
+environment or the keychain, like any other agent.
 
 ### The local engines (sano, Kokoro)
 
@@ -207,6 +221,8 @@ robot_voice/
   keys.py         where the Gemini key comes from
   claude_code.py  Claude Code hooks: stop, command
   hermes.py       Hermes hook and slash command
+pi/extension.ts   pi extension: speech at agent_settled, /robot
+package.json      pi package manifest
 hooks/hooks.json  Claude Code hook wiring  → hooks/claude.py
 .claude-plugin/   Claude Code plugin + marketplace manifests
 skills/           robot (loose phrasing, for Claude) + one shortcut per command
