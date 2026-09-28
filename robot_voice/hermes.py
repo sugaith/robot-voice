@@ -27,7 +27,8 @@ PROMPT = (
     "Your replies are spoken out loud by the robot-voice plugin (it detects "
     "Portuguese or English per reply). When the user asks to change the voice, "
     "engine, language or how much is spoken, or to hear something again, run "
-    "`%s <command>` and report its output. Commands: use <engine> [voice] "
+    "`%s --session %s <command>` and report its output. Changes apply to this "
+    "session; put `agent` or `global` right after the command to widen them. Commands: use <engine> [voice] "
     "(gemini, sano, kokoro, say), voice [name], voices, on, off, mode "
     "brief|prose|smart, lang auto|pt|en, random on|off, repeat [all|smart|slow|<n>], "
     "status; `help all` lists everything. Female Portuguese voice: kokoro pf_dora "
@@ -43,7 +44,7 @@ def on_turn(assistant_response="", session_id="", platform="", **_):
         return
     try:
         engine.spawn({"op": "reply", "text": assistant_response,
-                      "session": "hermes-%s" % (session_id or "default")})
+                      "session": "hermes:%s" % (session_id or "default")})
     except Exception as e:  # a broken speaker must never break a turn
         logger.debug("robot-voice: could not start speech: %s", e)
         engine.log("hermes hook: %s" % e)
@@ -53,7 +54,10 @@ def command(name):
     """The handler for /robot:<name>."""
     def handler(raw_args=""):
         try:
-            return ctl.shortcut(name, raw_args, PREFIX)
+            # A Hermes command gets only its arguments: act on the Hermes
+            # session that spoke last.
+            return ctl.shortcut(name, raw_args, PREFIX,
+                                session=engine.session_id(agent="hermes"))
         except (ctl.CtlError, ValueError):
             # A Hermes command can only return text, not hand words to the agent.
             return ("Not a command as typed. Ask in the chat instead, e.g. "
@@ -62,8 +66,9 @@ def command(name):
     return handler
 
 
-def prompt_section(_session=None):
-    return PROMPT % os.path.join(engine.ROOT, "bin", "robot-voice")
+def prompt_section(info=None):
+    sid = (info or {}).get("session_id") or "default"
+    return PROMPT % (os.path.join(engine.ROOT, "bin", "robot-voice"), "hermes:" + sid)
 
 
 def register(ctx):
@@ -71,4 +76,4 @@ def register(ctx):
     for name, desc in DESCRIPTIONS.items():
         ctx.register_command(PREFIX.lstrip("/") + name, handler=command(name),
                              description=desc, args_hint=ARGS_HINTS.get(name, ""))
-    ctx.register_system_prompt_section("robot-voice", prompt_section, max_chars=900)
+    ctx.register_system_prompt_section("robot-voice", prompt_section, max_chars=1100)

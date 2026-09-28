@@ -16,7 +16,10 @@ Run the CLI (the robot-voice extension puts it on your PATH):
 robot-voice <command>
 ```
 
-Report its output verbatim. `help all` lists every command. The user also
+Report its output verbatim. `help all` lists every command. Changes apply to
+this session only; put `agent` or `global` right after the command
+(`robot-voice use global kokoro`) when the user wants every pi session, or
+every agent, to change. The user also
 has `/robot:use`, `/robot:voice`, `/robot:all`, `/robot:tldr`, `/robot:brief`
 and `/robot:help`: exact commands run instantly without you, and
 `/robot:use` in plain words reaches you here.

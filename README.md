@@ -15,8 +15,10 @@ and speaks it in that language's voice. `/robot-voice:use`, `:voice`, `:all`,
 | **pi** | package: `agent_end` + `agent_settled` | `/robot:<command>`, native |
 | anything else | `robot-voice` CLI | `robot-voice <command>` |
 
-One repo is both plugins. Config and voices live once in `~/.robot-voice/`,
-so every agent speaks with the same voice.
+One repo is all three plugins. Settings live in `~/.robot-voice/`, in layers:
+global, then per agent, then per session. Two sessions of the same CLI can
+speak with different voices, and one agent's change doesn't touch another's.
+Replies from every agent play through one queue, so nobody cuts anybody off.
 
 ## Engines
 
@@ -207,10 +209,30 @@ Measured on a typical reply (137 chars, ~9s of audio) with
 | `smart` | a cheap Gemini call rewrites it into one spoken sentence |
 | `off` | nothing (replies are still remembered for `repeat`) |
 
+## Sessions, agents, and global
+
+Every setting a command changes (engine, voice, language, mode, random,
+on/off, style) is saved in one of three layers, and the most specific wins:
+
+| layer | set with | reaches |
+|---|---|---|
+| session | `/robot-voice:use kokoro` (the default inside a session) | this session only |
+| agent | `/robot-voice:use agent kokoro` | every session of this agent |
+| global | `/robot-voice:use global kokoro`, or any command from a bare terminal | every agent |
+
+A session that picks only its Portuguese voice keeps following every other
+global voice. `robot-voice status` ends with `set by`, naming what this session
+takes from its agent and what it sets itself; `reset`, `reset agent` and
+`reset global` clear one layer. When an agent runs `robot-voice` itself, it
+acts on its own session: Claude Code's session id reaches it through the
+environment, the pi extension exports one, and the Hermes prompt section names
+it.
+
 ## Config
 
-`~/.robot-voice/config.json` (override the location with `ROBOT_VOICE_HOME`).
-It holds everything the commands set, plus `fallbacks` (the chain after the
+`~/.robot-voice/config.json` (override the location with `ROBOT_VOICE_HOME`)
+holds the global layer and each agent's layer (`agents`); each session keeps
+its own under `sessions/`. It also holds `fallbacks` (the chain after the
 chosen engine), `local_python`, `max_chars_prose`, `max_chars_brief`,
 `summarizer_model` and `hermes_platforms`. Engine failures go to
 `~/.robot-voice/robot-voice.log`.
@@ -249,8 +271,13 @@ bin/robot-voice   the CLI (on Claude's Bash PATH while the plugin is enabled)
   after `off`, and five sessions at once each replay their own. A reply that's
   identical to the last one isn't spoken again; Claude Code re-fires `Stop` on
   `/clear`, resume and compact.
-- Saying an identical line again replays the clip already on disk. Changing
-  the engine, voice, model or style re-synthesizes.
+- Playback goes through one queue for every agent and session: a reply that
+  finishes while another is being spoken waits its turn. `stop` ends the
+  current clip and drops the queue.
+- Each utterance gets its own clip under `~/.robot-voice/clips/` (the last 20
+  are kept), so a queued one is never overwritten before its turn, and saying
+  an identical line again replays it from disk. Changing the engine, voice,
+  model or style re-synthesizes.
 
 macOS only for now: playback uses `afplay` and the last fallback is `say`.
 

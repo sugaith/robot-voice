@@ -6,6 +6,7 @@ Config and runtime state live in $ROBOT_VOICE_HOME (default ~/.robot-voice),
 shared by every agent the adapters wire up, so they all speak with one voice.
 """
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -26,8 +27,9 @@ HOME_DIR = os.environ.get("ROBOT_VOICE_HOME") or os.path.expanduser("~/.robot-vo
 CONFIG_PATH = os.path.join(HOME_DIR, "config.json")
 LOG_PATH = os.path.join(HOME_DIR, "robot-voice.log")
 PID_PATH = os.path.join(HOME_DIR, ".playing.pid")
-OUT_WAV = os.path.join(HOME_DIR, ".out.wav")
-OUT_KEY_PATH = os.path.join(HOME_DIR, ".out.key")
+PLAY_LOCK_PATH = os.path.join(HOME_DIR, ".play.lock")
+STOP_PATH = os.path.join(HOME_DIR, ".stopped")
+CLIPS_DIR = os.path.join(HOME_DIR, "clips")
 SESSIONS_DIR = os.path.join(HOME_DIR, "sessions")
 LAST_SESSION_PATH = os.path.join(HOME_DIR, ".last-session")
 LAST_VOICE_PATH = os.path.join(HOME_DIR, ".last-voice.json")
@@ -110,22 +112,44 @@ def log(message):
 
 # ---------------------------------------------------------------- session state
 
-def session_id(explicit=None):
-    """Per-session key, so concurrent sessions never replay each other.
+AGENTS = ("claude", "hermes", "pi")
 
-    Hooks pass the id explicitly. Commands fall back to Claude Code's env var,
-    then to whichever session spoke most recently -- Hermes hands a slash
-    command nothing but its arguments.
+
+def session_id(explicit=None, agent=None):
+    """Per-session key, "<agent>:<id>", so concurrent sessions never replay
+    each other and settings can differ per agent and per session.
+
+    Hooks pass the id explicitly. Commands the agent runs itself fall back to
+    ROBOT_VOICE_SESSION (set by the pi extension), then Claude Code's own
+    session variable, then -- with `agent`, for a Hermes slash command, which
+    gets nothing but its arguments -- whichever session of that agent spoke
+    last. A bare terminal has no session: its changes are global.
     """
     if explicit:
         return explicit
+    if os.environ.get("ROBOT_VOICE_SESSION"):
+        return os.environ["ROBOT_VOICE_SESSION"]
     if os.environ.get("CLAUDE_CODE_SESSION_ID"):
-        return os.environ["CLAUDE_CODE_SESSION_ID"]
+        return "claude:" + os.environ["CLAUDE_CODE_SESSION_ID"]
+    return last_session(agent) if agent else None
+
+
+def last_session(agent=None):
+    """The session that spoke last: of one agent, or of any."""
     try:
-        with open(LAST_SESSION_PATH) as f:
-            return f.read().strip() or "default"
+        with open(_last_session_path(agent)) as f:
+            return f.read().strip() or None
     except OSError:
-        return "default"
+        return None
+
+
+def agent_of(sid):
+    head = (sid or "").split(":", 1)[0]
+    return head if head in AGENTS and ":" in (sid or "") else None
+
+
+def _last_session_path(agent=None):
+    return LAST_SESSION_PATH + ("-" + agent if agent else "")
 
 
 def _safe(sid):
@@ -137,8 +161,9 @@ def _state_path(sid):
 
 
 def load_state(sid=None):
+    sid = session_id(sid) or last_session() or "default"
     try:
-        with open(_state_path(session_id(sid))) as f:
+        with open(_state_path(sid)) as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
@@ -146,7 +171,7 @@ def load_state(sid=None):
 
 def save_state(sid=None, **fields):
     os.makedirs(SESSIONS_DIR, exist_ok=True)
-    sid = session_id(sid)
+    sid = session_id(sid) or last_session() or "default"
     state = load_state(sid)
     state.update(fields)
     with open(_state_path(sid), "w") as f:
@@ -173,12 +198,77 @@ def remember_reply(sid, raw):
     if history and history[0] == raw:
         return False
     save_state(sid, history=[raw] + history[: HISTORY_LEN - 1], spoken="")
-    try:
-        with open(LAST_SESSION_PATH, "w") as f:
-            f.write(sid)
-    except OSError:
-        pass
+    for agent in {None, agent_of(sid)}:
+        try:
+            with open(_last_session_path(agent), "w") as f:
+                f.write(sid)
+        except OSError:
+            pass
     return True
+
+
+# ------------------------------------------------------------------ settings
+
+# Settings a session or an agent can override. Everything else (the key, the
+# local Python, Hermes' platforms) is machine-wide.
+LAYERED = ("enabled", "mode", "backend", "fallbacks", "lang", "random", "voices",
+           "style", "gemini_model")
+SCOPES = ("session", "agent", "global")
+
+
+def _overlay(cfg, layer):
+    for key, value in (layer or {}).items():
+        if key not in LAYERED:
+            continue
+        if key == "voices":
+            merged = {e: dict(v) for e, v in (cfg.get("voices") or {}).items()}
+            for eng, slots in (value or {}).items():
+                merged.setdefault(eng, {}).update(slots)
+            cfg["voices"] = merged
+        else:
+            cfg[key] = value
+    return cfg
+
+
+def layers(sid):
+    """(agent overrides, session overrides) for a session."""
+    agent = agent_of(sid)
+    agent_layer = load_config().get("agents", {}).get(agent, {}) if agent else {}
+    session_layer = load_state(sid).get("overrides", {}) if sid else {}
+    return agent_layer, session_layer
+
+
+def config_for(sid=None):
+    """The settings a session speaks with: global, then its agent's
+    overrides, then its own. The most specific one wins."""
+    cfg = load_config()
+    agent_layer, session_layer = layers(sid)
+    _overlay(cfg, agent_layer)
+    _overlay(cfg, session_layer)
+    return cfg
+
+
+def save_layer(scope, sid, changes, reset=False):
+    """Write changed settings to one layer: this session, this session's
+    agent, or the global config."""
+    changes = {k: v for k, v in changes.items() if k in LAYERED}
+    if scope == "session":
+        state = load_state(sid)
+        layer = {} if reset else state.get("overrides", {})
+        save_state(sid, overrides=_overlay(dict(layer), changes) if changes else layer)
+        return
+    cfg = load_config()
+    if scope == "agent":
+        agents = cfg.setdefault("agents", {})
+        layer = {} if reset else agents.get(agent_of(sid), {})
+        agents[agent_of(sid)] = _overlay(dict(layer), changes)
+    else:
+        if reset:
+            keep = {k: cfg[k] for k in ("agents", "gemini_api_key", "local_python",
+                                        "hermes_platforms") if k in cfg}
+            cfg = dict(DEFAULTS, voices={}, **keep)
+        _overlay(cfg, changes)
+    save_config(cfg)
 
 
 def history(sid=None):
@@ -308,6 +398,13 @@ def _redact(err):
 # ------------------------------------------------------------------- playback
 
 def stop_playing():
+    """Stop what's playing and drop everything queued behind it."""
+    try:
+        os.makedirs(HOME_DIR, exist_ok=True)
+        with open(STOP_PATH, "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
     try:
         with open(PID_PATH) as f:
             pid = int(f.read().strip())
@@ -316,15 +413,34 @@ def stop_playing():
         pass
 
 
-def _run_player(argv):
-    stop_playing()
-    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def _stopped_since(t0):
     try:
-        with open(PID_PATH, "w") as f:
-            f.write(str(proc.pid))
+        return os.path.getmtime(STOP_PATH) >= t0
     except OSError:
-        pass
-    proc.wait()
+        return False
+
+
+def _run_player(argv):
+    """Play through one queue shared by every agent and session: a reply that
+    finishes while another is being spoken waits its turn instead of cutting
+    it off. `stop` empties the queue."""
+    t0 = time.time()
+    os.makedirs(HOME_DIR, exist_ok=True)
+    with open(PLAY_LOCK_PATH, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            if _stopped_since(t0):
+                return
+            proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            try:
+                with open(PID_PATH, "w") as f:
+                    f.write(str(proc.pid))
+            except OSError:
+                pass
+            proc.wait()
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def play(path):
@@ -335,10 +451,11 @@ def play(path):
 
 WAV_ENGINES = ("gemini", "sano", "kokoro")
 ENGINES = ("gemini", "sano", "kokoro", "say")
+CLIPS_KEPT = 20
 
 
 def audio_key(text, engine, voice, cfg):
-    """Identifies the audio .out.wav holds: the words *and* their delivery.
+    """Identifies a clip: the words *and* their delivery.
 
     Engine, voice, model and style all change how the same sentence comes
     out, so any of them changing has to miss the cache.
@@ -347,6 +464,22 @@ def audio_key(text, engine, voice, cfg):
     if engine == "gemini":
         parts += [cfg.get("gemini_model", ""), cfg.get("style") or ""]
     return hashlib.sha256("\x00".join(str(p) for p in parts).encode()).hexdigest()
+
+
+def clip_path(key):
+    """Every utterance gets its own file: with speech queued, a shared one
+    would be overwritten before its turn came."""
+    return os.path.join(CLIPS_DIR, key[:24] + ".wav")
+
+
+def _prune_clips():
+    try:
+        clips = sorted((os.path.join(CLIPS_DIR, n) for n in os.listdir(CLIPS_DIR)),
+                       key=os.path.getmtime, reverse=True)
+        for path in clips[CLIPS_KEPT:]:
+            os.remove(path)
+    except OSError:
+        pass
 
 
 def record_last(**fields):
@@ -370,25 +503,24 @@ def last_voice():
 
 
 def replay(text, cfg):
-    """Play the cached wav if it is exactly this audio. True if it played.
-
-    Saying the same line again is otherwise a second round trip to the TTS
-    engine for a file already sitting on disk. With `random` on, "the same
-    audio" means the voice drawn last time.
+    """Play the clip already on disk if it is exactly this audio. True if it
+    played. Saying the same line again is otherwise a second round trip to
+    the engine. With `random` on, "the same audio" means the voice drawn last
+    time.
     """
     last = last_voice()
     engine = cfg["backend"]
-    if (last.get("engine") != engine or engine not in WAV_ENGINES
-            or not os.path.exists(OUT_WAV)):
+    if last.get("engine") != engine or engine not in WAV_ENGINES:
         return False
     lang = voices.lang_for(text, cfg, last.get("lang"))
     voice = last.get("voice") if cfg.get("random") else voices.configured(cfg, engine, lang)
-    if last.get("key") != audio_key(text, engine, voice, cfg):
+    key = audio_key(text, engine, voice, cfg)
+    if last.get("key") != key or not os.path.exists(clip_path(key)):
         return False
     if os.environ.get("ROBOT_VOICE_DRYRUN"):
         _dry_run("replay", voice, text)
         return True
-    play(OUT_WAV)
+    play(clip_path(key))
     return True
 
 
@@ -401,8 +533,9 @@ def write_wav(pcm, path, rate=24000):
 
 
 # -------------------------------------------------------------------- engines
+# A wav engine writes the clip to `out`; speak() plays it. say plays itself.
 
-def speak_gemini(text, cfg, voice):
+def speak_gemini(text, cfg, voice, out):
     prompt = (cfg.get("style") or "") + text
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -421,12 +554,10 @@ def speak_gemini(text, cfg, voice):
     m = re.search(r"rate=(\d+)", inline.get("mimeType", ""))
     if m:
         rate = int(m.group(1))
-    os.makedirs(HOME_DIR, exist_ok=True)
-    write_wav(base64.b64decode(inline["data"]), OUT_WAV, rate)
-    play(OUT_WAV)
+    write_wav(base64.b64decode(inline["data"]), out, rate)
 
 
-def speak_say(text, cfg, voice):
+def speak_say(text, cfg, voice, out=None):
     if not shutil.which("say"):
         raise RuntimeError("macOS `say` not found")
     argv = ["say", "-v", voice]
@@ -458,12 +589,11 @@ def local_python(cfg):
     return sys.executable
 
 
-def _speak_local(engine, text, cfg, voice):
+def _speak_local(engine, text, cfg, voice, out):
     env = dict(os.environ)
     env["PYTHONPATH"] = ROOT
     env.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-    os.makedirs(HOME_DIR, exist_ok=True)
-    tmp = OUT_WAV + ".part.wav"
+    tmp = out + ".part.wav"
     res = subprocess.run(
         [local_python(cfg), "-m", "robot_voice.local_tts", engine, voice, tmp,
          str(cfg.get("length_scale") or "")],
@@ -471,16 +601,15 @@ def _speak_local(engine, text, cfg, voice):
     if res.returncode != 0:
         lines = res.stderr.strip().splitlines()
         raise RuntimeError(lines[-1] if lines else "%s exited %d" % (engine, res.returncode))
-    os.replace(tmp, OUT_WAV)
-    play(OUT_WAV)
+    os.replace(tmp, out)
 
 
-def speak_sano(text, cfg, voice):
-    _speak_local("sano", text, cfg, voice)
+def speak_sano(text, cfg, voice, out):
+    _speak_local("sano", text, cfg, voice, out)
 
 
-def speak_kokoro(text, cfg, voice):
-    _speak_local("kokoro", text, cfg, voice)
+def speak_kokoro(text, cfg, voice, out):
+    _speak_local("kokoro", text, cfg, voice, out)
 
 
 BACKENDS = {"gemini": speak_gemini, "sano": speak_sano, "kokoro": speak_kokoro,
@@ -518,15 +647,22 @@ def speak(text, cfg):
             _dry_run(engine, voice, text)
             record_last(engine=engine, voice=voice, lang=lang, text=text, failed=[])
             return engine
+        key = audio_key(text, engine, voice, cfg) if engine in WAV_ENGINES else ""
+        out = clip_path(key) if key else None
         try:
-            BACKENDS[engine](text, cfg, voice)
+            if out:
+                os.makedirs(CLIPS_DIR, exist_ok=True)
+            BACKENDS[engine](text, cfg, voice, out)
         except Exception as e:
             reason = "%s: %s" % (engine, _redact(e))
             failures.append(reason)
             log("%s failed (%s)" % (engine, _redact(e)))
             continue
-        record_last(engine=engine, voice=voice, lang=lang, text=text, failed=failures,
-                    key=audio_key(text, engine, voice, cfg) if engine in WAV_ENGINES else "")
+        # Recorded before the clip plays, so a queued `repeat` finds it.
+        record_last(engine=engine, voice=voice, lang=lang, text=text, failed=failures, key=key)
+        if out:
+            _prune_clips()
+            play(out)
         return engine
     raise RuntimeError("no engine could speak: " + "; ".join(failures))
 
@@ -548,10 +684,10 @@ def handle_reply(raw, sid=None):
     raw = (raw or "").strip()
     if not raw:
         return None
-    sid = session_id(sid)
+    sid = session_id(sid) or "default"
     if not remember_reply(sid, raw):
         return None
-    cfg = load_config()
+    cfg = config_for(sid)
     if not cfg.get("enabled") or cfg.get("mode") == "off":
         return None
     line = shape(raw, cfg)
@@ -587,6 +723,6 @@ def run_job(job):
     if op == "reply":
         handle_reply(job.get("text", ""), job.get("session"))
     elif op == "say":
-        cfg = load_config()
+        cfg = config_for(job.get("session"))
         cfg.update(job.get("overrides") or {})
         say_again(job.get("text", ""), cfg)

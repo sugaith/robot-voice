@@ -21,6 +21,10 @@ robot-voice <command>
 
 Report its output verbatim. `robot-voice help all` lists every command.
 
+Changes apply to this session only. When the user wants every Claude session
+to change, put `agent` right after the command (`robot-voice use agent
+kokoro`); for every agent (Claude, Hermes, pi), put `global`.
+
 ## Mapping what the user says
 
 | User says | Command |

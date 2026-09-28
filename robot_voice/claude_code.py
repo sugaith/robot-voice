@@ -19,11 +19,16 @@ from . import ctl, engine
 PREFIX = "robot-voice:"
 
 
+def _session(payload):
+    sid = payload.get("session_id")
+    return "claude:" + sid if sid else None
+
+
 def stop(payload):
     if payload.get("stop_hook_active"):
         return
     engine.handle_reply(payload.get("last_assistant_message") or "",
-                        payload.get("session_id"))
+                        _session(payload))
 
 
 def command(payload):
@@ -33,7 +38,7 @@ def command(payload):
         return None
     try:
         out = ctl.shortcut(name[len(PREFIX):], payload.get("command_args"), "/" + PREFIX,
-                           session=payload.get("session_id"))
+                           session=_session(payload))
     except (ctl.CtlError, ValueError):
         return None  # plain words ("a female Portuguese voice"): the skill takes it
     return {"decision": "block", "reason": out}

@@ -27,6 +27,14 @@ function env(): NodeJS.ProcessEnv {
 	return { ...process.env, PYTHONPATH: prior ? `${ROOT}${path.delimiter}${prior}` : ROOT };
 }
 
+/** "pi:<id>". Also exported to the environment, so robot-voice commands the
+ * agent runs from its bash tool act on this session too. */
+function session(ctx: any): string {
+	const sid = `pi:${ctx.sessionManager.getSessionId()}`;
+	process.env.ROBOT_VOICE_SESSION = sid;
+	return sid;
+}
+
 function replyText(messages: any[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
@@ -69,6 +77,10 @@ export default function (pi: ExtensionAPI) {
 
 	let pending = "";
 
+	pi.on("session_start", async (_event, ctx) => {
+		session(ctx);
+	});
+
 	// agent_end fires after each low-level run; pi may still retry, compact or
 	// continue. Keep the reply, and speak it once the whole run has settled.
 	pi.on("agent_end", async (event) => {
@@ -80,7 +92,7 @@ export default function (pi: ExtensionAPI) {
 		pending = "";
 		// The interactive TUI only: `pi -p` in a script should stay quiet.
 		if (!text.trim() || ctx.mode !== "tui") return;
-		speak(text, `pi-${ctx.sessionManager.getSessionId()}`);
+		speak(text, session(ctx));
 	});
 
 	// /robot:use, :voice, :all, :tldr, :brief, :help -- the same commands as
@@ -91,7 +103,7 @@ export default function (pi: ExtensionAPI) {
 			handler: async (args, ctx) => {
 				const request = args.trim();
 				const argv = ["-m", "robot_voice", "--detach", "--shortcut", name,
-					"--prefix", "/robot:", "--session", `pi-${ctx.sessionManager.getSessionId()}`,
+					"--prefix", "/robot:", "--session", session(ctx),
 					...(request ? request.split(/\s+/) : [])];
 				const failed = await new Promise<boolean>((resolve) => {
 					execFile(PYTHON, argv, { cwd: ROOT, env: env(), timeout: 15000 },

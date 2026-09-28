@@ -1,6 +1,7 @@
 """python3 -m unittest discover tests -- runs silent, in a throwaway home."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,10 @@ class Base(unittest.TestCase):
                 os.remove(os.path.join(HOME, name))
             except OSError:
                 pass
+        shutil.rmtree(os.path.join(HOME, "sessions"), ignore_errors=True)
+        for name in os.listdir(HOME):
+            if name.startswith(".last-session"):
+                os.remove(os.path.join(HOME, name))
         engine.save_config(dict(engine.DEFAULTS, backend="say"))
 
 
@@ -81,7 +86,7 @@ class ClaudeCode(Base):
         ctl.run(["off"])
         claude_code.stop({"session_id": "s3", "last_assistant_message": "Muted reply."})
         self.assertEqual(spoken(), [])
-        self.assertEqual(ctl.run(["repeat", "show"], session="s3"), "Muted reply.")
+        self.assertEqual(ctl.run(["repeat", "show"], session="claude:s3"), "Muted reply.")
 
     def cmd(self, name, args=""):
         return claude_code.command({"command_name": "robot-voice:" + name,
@@ -100,7 +105,7 @@ class ClaudeCode(Base):
         self.assertIsNone(self.cmd("use", "uma voz feminina em portugues"))
 
     def test_replays(self):
-        engine.handle_reply("First sentence here. Then a lot more text follows. Ok?", "s4")
+        engine.handle_reply("First sentence here. Then a lot more text follows. Ok?", "claude:s4")
         open(SPOKEN, "w").close()
         self.assertIn("Then a lot more", self.cmd("all")["reason"])
         self.assertEqual(self.cmd("brief")["reason"], "First sentence here. Ok?")
@@ -269,10 +274,10 @@ class Engines(Base):
     def test_failed_engine_falls_through_and_is_reported(self):
         calls = []
 
-        def broken(text, cfg, voice):
+        def broken(text, cfg, voice, out=None):
             raise RuntimeError("not installed")
 
-        def ok(text, cfg, voice):
+        def ok(text, cfg, voice, out=None):
             calls.append(voice)
 
         saved = dict(engine.BACKENDS)
@@ -343,6 +348,101 @@ class Voices(Base):
                                          "kokoro": {"pt": "pf_dora"}})
         self.assertNotIn("kokoro_lang", cfg)
 
+
+
+class Scopes(Base):
+    def use(self, sid, args):
+        return claude_code.command({"command_name": "robot-voice:use",
+                                    "command_args": args, "session_id": sid})
+
+    def test_a_session_change_stays_in_that_session(self):
+        self.use("A", "kokoro pf_dora")
+        engine.handle_reply("Corrigi o bug no hook. Quer o PR?", "claude:A")
+        engine.handle_reply("Corrigi o bug no hook. Quer o PR?", "claude:B")
+        self.assertEqual([line[:2] for line in spoken()],
+                         [["kokoro", "pf_dora"], ["say", "Luciana"]])
+        self.assertEqual(engine.load_config()["backend"], "say")  # global untouched
+
+    def test_agent_scope_reaches_every_session_of_that_agent_only(self):
+        self.use("A", "agent sano")
+        self.assertEqual(engine.config_for("claude:B")["backend"], "sano")
+        self.assertEqual(engine.config_for("pi:X")["backend"], "say")
+        self.assertEqual(engine.config_for("hermes:Y")["backend"], "say")
+
+    def test_global_scope_from_inside_a_session(self):
+        self.use("A", "global kokoro")
+        self.assertEqual(engine.config_for("pi:X")["backend"], "kokoro")
+
+    def test_the_most_specific_layer_wins(self):
+        self.use("A", "agent sano")
+        self.use("A", "kokoro")
+        self.assertEqual(engine.config_for("claude:A")["backend"], "kokoro")
+        self.assertEqual(engine.config_for("claude:B")["backend"], "sano")
+
+    def test_a_session_voice_keeps_following_the_other_global_voices(self):
+        ctl.run(["voice", "pt", "Joana"], session="claude:A")
+        ctl.run(["voice", "en", "Alex"])  # bare terminal: global
+        cfg = engine.config_for("claude:A")
+        self.assertEqual(cfg["voices"]["say"], {"pt": "Joana", "en": "Alex"})
+
+    def test_a_bare_terminal_changes_global_even_after_a_session_spoke(self):
+        engine.handle_reply("Something was said.", "claude:A")
+        ctl.run(["use", "sano"])
+        self.assertEqual(engine.load_config()["backend"], "sano")
+        self.assertNotIn("overrides", engine.load_state("claude:A"))
+
+    def test_status_says_where_settings_come_from(self):
+        self.use("A", "agent sano")
+        self.use("A", "kokoro pf_dora")
+        out = ctl.run(["status"], session="claude:A")
+        self.assertIn("set by   claude: backend · this session: backend, voice kokoro.pt", out)
+
+    def test_reset_clears_only_its_layer(self):
+        self.use("A", "agent sano")
+        self.use("A", "kokoro")
+        ctl.run(["reset"], session="claude:A")
+        self.assertEqual(engine.config_for("claude:A")["backend"], "sano")
+        ctl.run(["reset", "agent"], session="claude:A")
+        self.assertEqual(engine.config_for("claude:A")["backend"], "say")
+
+    def test_hermes_prompt_names_its_session(self):
+        text = hermes.prompt_section({"session_id": "abc123"})
+        self.assertIn("--session hermes:abc123", text)
+        self.assertLessEqual(len(text), 1100)
+
+
+class Queue(unittest.TestCase):
+    def test_players_take_turns(self):
+        import threading
+        spans = []
+
+        def play():
+            t0 = time.time()
+            engine._run_player(["sleep", "0.3"])
+            spans.append((t0, time.time()))
+        threads = [threading.Thread(target=play) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        ends = sorted(end for _, end in spans)
+        self.assertGreaterEqual(ends[1] - ends[0], 0.25)  # the second waited its turn
+
+    def test_stop_drops_what_is_queued(self):
+        import threading
+        done = []
+        first = threading.Thread(target=lambda: engine._run_player(["sleep", "0.5"]))
+        first.start()
+        time.sleep(0.1)
+        second = threading.Thread(
+            target=lambda: (engine._run_player(["sleep", "2"]), done.append(time.time())))
+        t0 = time.time()
+        second.start()
+        time.sleep(0.1)
+        engine.stop_playing()
+        first.join()
+        second.join()
+        self.assertLess(done[0] - t0, 1.5)  # the queued 2s sleep never ran
 
 if __name__ == "__main__":
     unittest.main()

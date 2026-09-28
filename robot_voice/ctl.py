@@ -1,10 +1,11 @@
-"""The commands behind /robot, in every agent.
+"""The commands behind robot-voice, in every agent.
 
 `run(argv)` returns the text to show and raises CtlError for bad input, so
 each surface decides how to display it: the terminal prints, Claude Code's
 command hook shows it in place of a model turn, Hermes returns it from its
 slash command.
 """
+import copy
 import shlex
 
 from . import engine, keys, voices
@@ -68,6 +69,11 @@ COMMANDS = frozenset(
     + MODES + BACKEND_CMDS + BACKEND_NAMES + REPLAY_CMDS)
 
 
+# Commands that change a setting, and so take a scope.
+SETTINGS = frozenset(("on", "off", "mode", "voice", "lang", "random", "model", "style",
+                      "reset") + MODES + BACKEND_CMDS + BACKEND_NAMES)
+
+
 class CtlError(Exception):
     pass
 
@@ -86,6 +92,9 @@ HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
   {p}tldr                   ...as one short sentence (Gemini; else the first one)
   {p}brief                  ...its first sentence and closing question
   {p}help                   this
+
+Changes stay in this session. Add `agent` (every session of this agent) or
+`global` (every agent) after the command: {p}use global kokoro
 
 Everything else (on/off, mode, lang, random, status...): robot-voice help all"""
 
@@ -113,20 +122,40 @@ def shortcut(name, args, prefix, detach=True, session=None):
     if name == "help":
         return USAGE if argv[1:2] == ["all"] else help_text(prefix)
     if name == "use" and len(argv) == 1:
-        return status(engine.load_config())
+        return status(engine.config_for(session), session)
     return run(argv, detach=detach, session=session)
+
+
+def _scope(rest, session):
+    """(scope, remaining args). A leading `session`, `agent` or `global` after
+    the command picks where a change is saved. Without one, a change made from
+    inside a session stays in that session; from a bare terminal it's global."""
+    if rest and rest[0].lower() in engine.SCOPES:
+        scope, rest = rest[0].lower(), rest[1:]
+    else:
+        scope = "session" if session else "global"
+    if scope in ("session", "agent") and not session:
+        raise CtlError("no session here to scope that to -- use `global`")
+    if scope == "agent" and not engine.agent_of(session):
+        raise CtlError("can't tell which agent this session belongs to")
+    return scope, rest
 
 
 def run(argv, detach=False, session=None):
     """Execute one command. With `detach`, speech plays in the background and
     this returns at once -- for hosts that must not block on audio."""
-    cfg = engine.load_config()
+    session = engine.session_id(session)
+    cfg = engine.config_for(session)
     cmd = (argv[0] if argv else "status").lower()
     rest = argv[1:]
+    scope = None
+    if cmd in SETTINGS:
+        scope, rest = _scope(rest, session)
     arg = " ".join(rest).strip()
+    before = copy.deepcopy(cfg)
 
     if cmd in ("status", "show"):
-        return status(cfg)
+        return status(cfg, session)
     if cmd == "help":
         return USAGE if rest[:1] == ["all"] else help_text("robot-voice ")
     if cmd == "voices":
@@ -141,13 +170,13 @@ def run(argv, detach=False, session=None):
     if cmd == "say":
         if not arg:
             raise CtlError("need something to say")
-        _speak(arg, cfg, detach)
+        _speak(arg, cfg, detach, session=session)
         return arg
     if cmd == "test":
         sample = arg or {"pt": "O robô está no ar. É assim que as respostas vão soar.",
                          "en": "Robot voice is live. This is how your replies will sound."
                          }[cfg["lang"] if cfg["lang"] in voices.LANGS else "en"]
-        _speak(sample, cfg, detach)
+        _speak(sample, cfg, detach, session=session)
         return "speaking: " + sample
     if cmd == "key":
         return ("Run `robot-voice key` in a terminal. A key typed into the agent's "
@@ -191,12 +220,31 @@ def run(argv, detach=False, session=None):
     elif cmd == "style":
         cfg["style"] = (arg + " ") if arg else ""
     elif cmd == "reset":
-        cfg = dict(engine.DEFAULTS, voices={})
+        engine.save_layer(scope, session, {}, reset=True)
+        return status(engine.config_for(session), session)
     else:
         raise CtlError(USAGE)
 
-    engine.save_config(cfg)
-    return status(cfg)
+    engine.save_layer(scope, session, _changes(before, cfg))
+    return status(engine.config_for(session), session)
+
+
+def _changes(before, after):
+    """What a command changed, down to single voice slots, so a session that
+    only picked its Portuguese voice still follows every other global voice."""
+    changed = {}
+    for key in engine.LAYERED:
+        if key == "voices":
+            slots = {}
+            for eng, langs in (after.get("voices") or {}).items():
+                for lang, name in langs.items():
+                    if (before.get("voices") or {}).get(eng, {}).get(lang) != name:
+                        slots.setdefault(eng, {})[lang] = name
+            if slots:
+                changed["voices"] = slots
+        elif before.get(key) != after.get(key):
+            changed[key] = after.get(key)
+    return changed
 
 
 def use(cfg, rest):
@@ -249,9 +297,10 @@ def set_voice(cfg, rest):
     slots[lang] = name
 
 
-def _speak(text, cfg, detach, overrides=None):
+def _speak(text, cfg, detach, overrides=None, session=None):
     if detach:
-        engine.spawn({"op": "say", "text": text, "overrides": overrides or {}})
+        engine.spawn({"op": "say", "text": text, "overrides": overrides or {},
+                      "session": session})
         return
     use = dict(cfg)
     use.update(overrides or {})
@@ -277,7 +326,29 @@ def _last_line():
     return line
 
 
-def status(cfg):
+def _where(session):
+    """Which settings this session gets from its agent or sets itself."""
+    if not session:
+        return None
+    agent_layer, session_layer = engine.layers(session)
+
+    def names(layer):
+        out = []
+        for key, value in layer.items():
+            if key == "voices":
+                out += ["voice %s.%s" % (e, l) for e, ls in value.items() for l in ls]
+            elif key in engine.LAYERED:
+                out.append(key)
+        return ", ".join(out)
+    parts = []
+    if names(agent_layer):
+        parts.append("%s: %s" % (engine.agent_of(session), names(agent_layer)))
+    if names(session_layer):
+        parts.append("this session: " + names(session_layer))
+    return " · ".join(parts) or None
+
+
+def status(cfg, session=None):
     state = "on" if cfg["enabled"] and cfg["mode"] != "off" else "off"
     lines = [
         "speech   " + state,
@@ -293,6 +364,9 @@ def status(cfg):
         _, source = keys.find(cfg)
         lines.append("key      " + (source or "MISSING -- Gemini will be skipped "
                                      "(run `robot-voice key`)"))
+    where = _where(session)
+    if where:
+        lines.append("set by   " + where)
     last = _last_line()
     if last:
         lines.append("last     " + last)
@@ -372,5 +446,5 @@ def repeat(argv, cfg, detach=False, session=None):
     if not text.strip():
         raise CtlError("nothing to repeat yet")
     if not show_only:
-        _speak(text, cfg, detach, overrides)
+        _speak(text, cfg, detach, overrides, session=session)
     return text
