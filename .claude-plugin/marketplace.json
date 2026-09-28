@@ -1,6 +1,6 @@
 {
   "name": "robot-voice",
-  "description": "Robot Voice: spoken replies for Claude Code.",
+  "description": "Robot Voice: spoken replies for Claude Code, in English and Portuguese.",
   "owner": {
     "name": "Sugaith"
   },
@@ -8,7 +8,7 @@
     {
       "name": "robot-voice",
       "source": "./",
-      "description": "Speaks Claude's replies out loud, with /speak to control and replay them."
+      "description": "Speaks Claude's replies out loud, with /robot to control and replay them."
     }
   ]
 }

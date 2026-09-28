@@ -1,6 +1,7 @@
 """Shaping replies for the ear, and speaking them.
 
-Backends: gemini (Gemini API), say (macOS built-in), kokoro (local model).
+Engines: gemini (Gemini API), sano and kokoro (local models, run in their own
+Python environment), and say (macOS built-in, always the last fallback).
 Config and runtime state live in $ROBOT_VOICE_HOME (default ~/.robot-voice),
 shared by every agent the adapters wire up, so they all speak with one voice.
 """
@@ -18,7 +19,7 @@ import time
 import urllib.request
 import wave
 
-from . import keys
+from . import keys, voices
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME_DIR = os.environ.get("ROBOT_VOICE_HOME") or os.path.expanduser("~/.robot-voice")
@@ -29,6 +30,7 @@ OUT_WAV = os.path.join(HOME_DIR, ".out.wav")
 OUT_KEY_PATH = os.path.join(HOME_DIR, ".out.key")
 SESSIONS_DIR = os.path.join(HOME_DIR, "sessions")
 LAST_SESSION_PATH = os.path.join(HOME_DIR, ".last-session")
+LAST_VOICE_PATH = os.path.join(HOME_DIR, ".last-voice.json")
 # Where this project lived when it only spoke for Claude Code.
 LEGACY_CONFIG = os.path.expanduser("~/.claude-speak/config.json")
 
@@ -39,13 +41,15 @@ LOG_MAX_BYTES = 256 * 1024
 DEFAULTS = {
     "enabled": True,
     "mode": "brief",            # prose | brief | smart | off
-    "backend": "gemini",        # gemini | say | kokoro
+    "backend": "gemini",        # gemini | sano | kokoro | say
+    # Tried in order when the backend fails; say always comes last.
+    "fallbacks": ["sano", "kokoro"],
+    "lang": "auto",             # auto | en | pt
+    "random": False,            # a random voice for every reply
+    "voices": {},               # {engine: {en: voice, pt: voice}}, over the defaults
+    "local_python": "",         # python with sanotts/kokoro; found automatically
     "gemini_model": "gemini-2.5-flash-preview-tts",
-    "gemini_voice": "Kore",
     "summarizer_model": "gemini-2.5-flash-lite",
-    "say_voice": "Samantha",
-    "kokoro_voice": "af_heart",
-    "kokoro_lang": "a",
     "max_chars_prose": 600,
     "max_chars_brief": 220,
     "style": "",               # e.g. "Say it calm and low-key: " (gemini only)
@@ -65,7 +69,23 @@ def load_config():
             cfg.update(json.load(f))
     except (OSError, ValueError):
         pass
+    _migrate_voices(cfg)
     return cfg
+
+
+def _migrate_voices(cfg):
+    """Carry the one-voice-per-engine keys of 0.1 into the per-language slots."""
+    slots = cfg["voices"] = {k: dict(v) for k, v in (cfg.get("voices") or {}).items()}
+    old = {"gemini": ("gemini_voice", ("en", "pt")), "say": ("say_voice", ("en",)),
+           "kokoro": ("kokoro_voice", ("en",))}
+    for engine, (key, langs) in old.items():
+        name = cfg.pop(key, None)
+        if not name or name == voices.DEFAULT_VOICES[engine]["en"]:
+            continue
+        lang = None if engine == "gemini" else voices.lang_of_voice(engine, name)
+        for slot in ((lang,) if lang else langs):
+            slots.setdefault(engine, {}).setdefault(slot, name)
+    cfg.pop("kokoro_lang", None)
 
 
 def save_config(cfg):
@@ -86,17 +106,6 @@ def log(message):
             f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), message))
     except OSError:
         pass
-
-
-def last_log_line(max_age_hours=24):
-    try:
-        if time.time() - os.path.getmtime(LOG_PATH) > max_age_hours * 3600:
-            return None
-        with open(LOG_PATH) as f:
-            lines = f.read().strip().splitlines()
-        return lines[-1] if lines else None
-    except OSError:
-        return None
 
 
 # ---------------------------------------------------------------- session state
@@ -190,7 +199,7 @@ TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s*")
 BULLET_RE = re.compile(r"^\s*[-*+]\s+|^\s*\d+[.)]\s+")
 EMPHASIS_RE = re.compile(r"\*\*([^*]+)\*\*|\*([^*]+)\*|__([^_]+)__")
-# Paths, but not slash-commands: /speak survives, /Users/me/x.py does not.
+# Paths, but not slash-commands: /robot survives, /Users/me/x.py does not.
 PATHY_RE = re.compile(
     r"(?<!\w)[\w.-]+(?:/[\w.-]+)*"
     r"\.(?:py|ts|tsx|js|jsx|json|md|sh|go|rs|java|yml|yaml)\b"
@@ -324,51 +333,60 @@ def play(path):
     _run_player(["afplay", path])
 
 
-WAV_BACKENDS = ("gemini", "kokoro")
+WAV_ENGINES = ("gemini", "sano", "kokoro")
+ENGINES = ("gemini", "sano", "kokoro", "say")
 
 
-def audio_key(text, cfg, backend=None):
+def audio_key(text, engine, voice, cfg):
     """Identifies the audio .out.wav holds: the words *and* their delivery.
 
-    Voice, model and style all change how the same sentence comes out, so any
-    of them changing has to miss the cache.
+    Engine, voice, model and style all change how the same sentence comes
+    out, so any of them changing has to miss the cache.
     """
-    name = backend or cfg["backend"]
-    parts = [name, text]
-    if name == "gemini":
-        parts += [cfg.get("gemini_voice", ""), cfg.get("gemini_model", ""),
-                  cfg.get("style") or ""]
-    else:
-        parts += [cfg.get("kokoro_voice", ""), cfg.get("kokoro_lang", "")]
-    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
+    parts = [engine, voice, text, cfg.get("length_scale") or ""]
+    if engine == "gemini":
+        parts += [cfg.get("gemini_model", ""), cfg.get("style") or ""]
+    return hashlib.sha256("\x00".join(str(p) for p in parts).encode()).hexdigest()
 
 
-def remember_audio(text, cfg, backend=None):
-    """Tag the wav just written, so an identical line can replay it."""
+def record_last(**fields):
+    """What actually spoke last: engine, voice, language, and what failed
+    first. `status` shows it, so a fallback never goes unnoticed."""
+    fields["at"] = time.strftime("%H:%M:%S")
     try:
-        with open(OUT_KEY_PATH, "w") as f:
-            f.write(audio_key(text, cfg, backend))
+        os.makedirs(HOME_DIR, exist_ok=True)
+        with open(LAST_VOICE_PATH, "w") as f:
+            json.dump(fields, f)
     except OSError:
         pass
 
 
-def replay(text, cfg, backend=None):
+def last_voice():
+    try:
+        with open(LAST_VOICE_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def replay(text, cfg):
     """Play the cached wav if it is exactly this audio. True if it played.
 
     Saying the same line again is otherwise a second round trip to the TTS
-    backend for a file already sitting on disk.
+    engine for a file already sitting on disk. With `random` on, "the same
+    audio" means the voice drawn last time.
     """
-    name = backend or cfg["backend"]
-    if name not in WAV_BACKENDS or not os.path.exists(OUT_WAV):
+    last = last_voice()
+    engine = cfg["backend"]
+    if (last.get("engine") != engine or engine not in WAV_ENGINES
+            or not os.path.exists(OUT_WAV)):
         return False
-    try:
-        with open(OUT_KEY_PATH) as f:
-            if f.read().strip() != audio_key(text, cfg, name):
-                return False
-    except OSError:
+    lang = voices.lang_for(text, cfg, last.get("lang"))
+    voice = last.get("voice") if cfg.get("random") else voices.configured(cfg, engine, lang)
+    if last.get("key") != audio_key(text, engine, voice, cfg):
         return False
     if os.environ.get("ROBOT_VOICE_DRYRUN"):
-        _dry_run("replay", text)
+        _dry_run("replay", voice, text)
         return True
     play(OUT_WAV)
     return True
@@ -382,16 +400,16 @@ def write_wav(pcm, path, rate=24000):
         w.writeframes(pcm)
 
 
-# ------------------------------------------------------------------- backends
+# -------------------------------------------------------------------- engines
 
-def speak_gemini(text, cfg):
+def speak_gemini(text, cfg, voice):
     prompt = (cfg.get("style") or "") + text
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {"voiceConfig": {
-                "prebuiltVoiceConfig": {"voiceName": cfg["gemini_voice"]}}},
+                "prebuiltVoiceConfig": {"voiceName": voice}}},
         },
     }
     req = urllib.request.Request(_gemini_url(cfg["gemini_model"], cfg),
@@ -408,60 +426,109 @@ def speak_gemini(text, cfg):
     play(OUT_WAV)
 
 
-def speak_say(text, cfg):
+def speak_say(text, cfg, voice):
     if not shutil.which("say"):
         raise RuntimeError("macOS `say` not found")
-    argv = ["say", "-v", cfg["say_voice"]]
+    argv = ["say", "-v", voice]
     if cfg.get("say_rate"):
         argv += ["-r", str(cfg["say_rate"])]
     _run_player(argv + [text])
 
 
-def speak_kokoro(text, cfg):
-    try:
-        import numpy as np
-        from kokoro import KPipeline
-    except ImportError:
-        raise RuntimeError("kokoro not installed. Run: pip install kokoro soundfile "
-                           "&& brew install espeak-ng")
-    pipe = KPipeline(lang_code=cfg["kokoro_lang"])
-    chunks = [audio for _, _, audio in pipe(text, voice=cfg["kokoro_voice"])]
-    if not chunks:
-        return
-    audio = np.concatenate(chunks)
-    pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes()
+LOCAL_PYTHON_CANDIDATES = (
+    "~/.robot-voice/venv/bin/python",
+    "/opt/miniconda3/envs/robot-voice/bin/python",
+    "~/miniconda3/envs/robot-voice/bin/python",
+    "~/anaconda3/envs/robot-voice/bin/python",
+    "/opt/homebrew/Caskroom/miniconda/base/envs/robot-voice/bin/python",
+)
+
+
+def local_python(cfg):
+    """The interpreter that has sanotts / kokoro installed. They pull in numpy
+    (and kokoro, PyTorch), so they live in their own environment rather than
+    in whatever python3 the agent happens to run hooks with."""
+    explicit = cfg.get("local_python") or os.environ.get("ROBOT_VOICE_PYTHON")
+    if explicit:
+        return os.path.expanduser(explicit)
+    for candidate in LOCAL_PYTHON_CANDIDATES:
+        path = os.path.expanduser(candidate)
+        if os.path.exists(path):
+            return path
+    return sys.executable
+
+
+def _speak_local(engine, text, cfg, voice):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = ROOT
+    env.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     os.makedirs(HOME_DIR, exist_ok=True)
-    write_wav(pcm, OUT_WAV, 24000)
+    tmp = OUT_WAV + ".part.wav"
+    res = subprocess.run(
+        [local_python(cfg), "-m", "robot_voice.local_tts", engine, voice, tmp,
+         str(cfg.get("length_scale") or "")],
+        input=text, capture_output=True, text=True, env=env, timeout=120)
+    if res.returncode != 0:
+        lines = res.stderr.strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else "%s exited %d" % (engine, res.returncode))
+    os.replace(tmp, OUT_WAV)
     play(OUT_WAV)
 
 
-BACKENDS = {"gemini": speak_gemini, "say": speak_say, "kokoro": speak_kokoro}
+def speak_sano(text, cfg, voice):
+    _speak_local("sano", text, cfg, voice)
 
 
-def _dry_run(backend, text):
+def speak_kokoro(text, cfg, voice):
+    _speak_local("kokoro", text, cfg, voice)
+
+
+BACKENDS = {"gemini": speak_gemini, "sano": speak_sano, "kokoro": speak_kokoro,
+            "say": speak_say}
+
+
+def chain(cfg):
+    """The engines to try, in order: the chosen one, then the configured
+    fallbacks, and macOS `say` always last -- it needs nothing and never
+    leaves a reply unspoken."""
+    if cfg["backend"] == "say":
+        return ["say"]  # chosen on purpose: nothing to fall back from
+    order = [cfg["backend"]] + list(cfg.get("fallbacks") or [])
+    picked = []
+    for name in order:
+        if name in BACKENDS and name != "say" and name not in picked:
+            picked.append(name)
+    return picked + ["say"]
+
+
+def _dry_run(engine, voice, text):
     """ROBOT_VOICE_DRYRUN=<file>: record what would be spoken instead of
     playing it. Lets tests and adapters run end to end in silence."""
     with open(os.environ["ROBOT_VOICE_DRYRUN"], "a") as f:
-        f.write("%s\t%s\n" % (backend, text))
+        f.write("%s\t%s\t%s\n" % (engine, voice, text))
 
 
-def speak(text, cfg, backend=None):
-    """Speak text, falling back to macOS `say` if the chosen backend fails."""
-    name = backend or cfg["backend"]
-    if os.environ.get("ROBOT_VOICE_DRYRUN"):
-        _dry_run(name, text)
-        return
-    try:
-        BACKENDS[name](text, cfg)
-    except Exception as e:
-        if name == "say":
-            log("say failed: %s" % e)
-            raise
-        log("%s failed (%s); fell back to say" % (name, _redact(e)))
-        speak_say(text, cfg)
-        return
-    if name in WAV_BACKENDS:
-        remember_audio(text, cfg, name)
+def speak(text, cfg):
+    """Speak text through the first engine in the chain that works."""
+    lang = voices.lang_for(text, cfg, last_voice().get("lang"))
+    failures = []
+    for engine in chain(cfg):
+        voice = voices.pick(cfg, engine, lang)
+        if os.environ.get("ROBOT_VOICE_DRYRUN"):
+            _dry_run(engine, voice, text)
+            record_last(engine=engine, voice=voice, lang=lang, text=text, failed=[])
+            return engine
+        try:
+            BACKENDS[engine](text, cfg, voice)
+        except Exception as e:
+            reason = "%s: %s" % (engine, _redact(e))
+            failures.append(reason)
+            log("%s failed (%s)" % (engine, _redact(e)))
+            continue
+        record_last(engine=engine, voice=voice, lang=lang, text=text, failed=failures,
+                    key=audio_key(text, engine, voice, cfg) if engine in WAV_ENGINES else "")
+        return engine
+    raise RuntimeError("no engine could speak: " + "; ".join(failures))
 
 
 def say_again(text, cfg):

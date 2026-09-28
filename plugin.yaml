@@ -1,6 +1,6 @@
 name: robot-voice
-version: 0.1.0
-description: "Speaks each finished reply out loud (Gemini, macOS say, or local Kokoro), with /speak to control and replay it."
+version: 0.2.0
+description: "Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot to control and replay it."
 author: Sugaith
 manifest_version: 2
 api_version: 1
@@ -19,5 +19,5 @@ config_schema:
     type: secret
     env: GEMINI_API_KEY
     label: Gemini API key
-    description: "For the Gemini voices, from aistudio.google.com/apikey. Leave empty to use the free macOS voice."
+    description: "For the Gemini voices, from aistudio.google.com/apikey. Leave empty to use the local voices (sano, Kokoro) or macOS say."
     required: false

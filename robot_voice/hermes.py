@@ -1,4 +1,4 @@
-"""Hermes Agent adapter: a post_llm_call hook and a native /speak command.
+"""Hermes Agent adapter: a post_llm_call hook and a native /robot command.
 
 Hermes runs both inside its own process, so neither may wait on audio. Every
 reply is spoken by a detached child running Hermes' own interpreter; the
@@ -11,8 +11,8 @@ from . import ctl, engine
 
 logger = logging.getLogger(__name__)
 
-DESCRIPTION = "Robot voice: speak replies out loud -- /speak help"
-ARGS_HINT = "[status|on|off|mode|use|voice|repeat|say|test|help]"
+DESCRIPTION = "Robot voice: speaks replies out loud -- /robot help"
+ARGS_HINT = "[status|on|off|mode|use|lang|voice|random|repeat|say|help]"
 
 
 def on_turn(assistant_response="", session_id="", platform="", **_):
@@ -45,5 +45,5 @@ def on_command(raw_args=""):
 
 def register(ctx):
     ctx.register_hook("post_llm_call", on_turn)
-    ctx.register_command("speak", handler=on_command, description=DESCRIPTION,
+    ctx.register_command("robot", handler=on_command, description=DESCRIPTION,
                          args_hint=ARGS_HINT)

@@ -16,7 +16,7 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^(robot-voice:)?speak$",
+        "matcher": "^(robot-voice:)?robot$",
         "hooks": [
           {
             "type": "command",

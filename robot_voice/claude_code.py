@@ -3,7 +3,7 @@
 stop     -- Stop hook. Claude Code hands over the finished reply as
             `last_assistant_message`, so there is no transcript to parse and
             no race with the writer.
-command  -- UserPromptExpansion hook on /speak. A valid command runs right
+command  -- UserPromptExpansion hook on /robot. A valid command runs right
             here and its output replaces the model turn: no tokens, no
             interpretation. Anything else ("talk slower please", "mode loud")
             expands into the skill as usual and the model maps it.
@@ -16,7 +16,7 @@ import sys
 
 from . import ctl, engine
 
-SKILL_NAMES = ("speak", "robot-voice:speak")
+SKILL_NAMES = ("robot", "robot-voice:robot")
 
 
 def stop(payload):

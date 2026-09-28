@@ -1,20 +1,25 @@
 {
   "name": "robot-voice",
   "displayName": "Robot Voice",
-  "version": "0.1.0",
-  "description": "Speaks Claude's replies out loud (Gemini, macOS say, or local Kokoro), with /speak to control and replay them.",
+  "version": "0.2.0",
+  "description": "Speaks Claude's replies out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot to control and replay them.",
   "author": {
     "name": "Sugaith"
   },
   "homepage": "https://github.com/sugaith/robot-voice",
   "repository": "https://github.com/sugaith/robot-voice",
   "license": "MIT",
-  "keywords": ["tts", "voice", "speech", "accessibility"],
+  "keywords": [
+    "tts",
+    "voice",
+    "speech",
+    "accessibility"
+  ],
   "userConfig": {
     "gemini_api_key": {
       "type": "string",
       "title": "Gemini API key",
-      "description": "For the Gemini voices, from aistudio.google.com/apikey. Leave empty to use the free macOS voice.",
+      "description": "For the Gemini voices, from aistudio.google.com/apikey. Leave empty to use the local voices (sano, Kokoro) or macOS say.",
       "sensitive": true
     }
   }

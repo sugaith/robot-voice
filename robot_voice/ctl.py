@@ -1,52 +1,48 @@
-"""The commands behind /speak, in every agent.
+"""The commands behind /robot, in every agent.
 
 `run(argv)` returns the text to show and raises CtlError for bad input, so
 each surface decides how to display it: the terminal prints, Claude Code's
 command hook shows it in place of a model turn, Hermes returns it from its
 slash command.
 """
-import shutil
-import subprocess
-
-from . import engine, keys
-
-GEMINI_VOICES = [
-    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
-    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
-]
+from . import engine, keys, voices
 
 MODES = ("prose", "brief", "smart", "off")
-BACKENDS = ("gemini", "say", "kokoro")
+BACKENDS = engine.ENGINES
 BACKEND_CMDS = ("use", "backend", "provider", "engine")
 # Bare-name shortcut for engines. `say` is left out: it means "say these words".
-BACKEND_NAMES = ("gemini", "kokoro")
+BACKEND_NAMES = ("gemini", "sano", "kokoro")
 REPLAY_CMDS = ("repeat", "again")
 REPLAY_MODES = ("brief", "prose", "smart")
+ON = ("on", "yes", "true", "1")
+OFF = ("off", "no", "false", "0")
 
-USAGE = """usage: robot-voice <command>
+USAGE = """usage: /robot <command>        (terminal: robot-voice <command>)
 
-  status                 show current settings
-  on | off               enable / disable spoken replies
-  mode prose|brief|smart set how much gets spoken
-  use gemini|say|kokoro  switch TTS engine (aliases: backend, provider, engine;
-                         or just name it: `gemini`, `kokoro`)
-  voice <name>           set voice for the active engine
-  voices                 list voices for the active engine
-  model <id>             set the Gemini TTS model
-  style <text>           Gemini delivery style, e.g. "Say it calm:" ("" clears)
-  lang pt|en             shortcut: switch voice+lang for Portuguese/English
-  test [text]            speak a sample now
-  stop                   stop playback
-  reset                  restore defaults
-  key                    store a Gemini API key in the keychain (terminal only)
+  status                   settings, and what actually spoke last
+  on | off                 enable / disable spoken replies
+  mode prose|brief|smart   how much gets spoken
+  use gemini|sano|kokoro|say
+                           switch engine (or just name it: /robot sano)
+  lang auto|pt|en          auto picks per reply; pt / en pin one language
+  voice                    the current voices, and the one heard last
+  voice <name>             set a voice (pt or en slot, from the name)
+  voice pt|en <name>       set the voice for one language explicitly
+  voices                   list the active engine's voices, per language
+  random [on|off]          a random voice for every reply
+  model <id>               the Gemini TTS model
+  style <text>             Gemini delivery style, e.g. "Say it calm:" ("" clears)
+  test [text]              speak a sample now
+  stop                     stop playback
+  reset                    restore defaults
+  key                      (terminal only) store a Gemini API key in the keychain
 
-  repeat [command]       say a reply again (alias: again) -- `repeat help`
-  say <words>            speak arbitrary words"""
+  repeat [command]         say a reply again (alias: again) -- `repeat help`
+  say <words>              speak arbitrary words
 
-REPEAT_USAGE = """usage: robot-voice repeat [command]
+Engines fall back in order (see status); macOS say is always the last resort."""
+
+REPEAT_USAGE = """usage: /robot repeat [command]
 
   (none)        say the last spoken line again, verbatim
   all           the full last reply, uncapped
@@ -59,13 +55,14 @@ REPEAT_USAGE = """usage: robot-voice repeat [command]
   list          show the last few replies without speaking
   show [cmd]    print what would be spoken, without speaking it"""
 
-SLOW = {"style": "Say this slowly and clearly, with pauses: ", "say_rate": 145}
+SLOW = {"style": "Say this slowly and clearly, with pauses: ", "say_rate": 145,
+        "length_scale": 1.3}
 
 # Every first word `run` understands. Claude Code's command hook answers these
 # directly; anything else ("talk slower please") goes to the model instead.
 COMMANDS = frozenset(
     ("status", "show", "help", "on", "off", "mode", "voice", "voices", "model",
-     "style", "lang", "test", "stop", "reset", "key", "say")
+     "style", "lang", "random", "test", "stop", "reset", "key", "say")
     + MODES + BACKEND_CMDS + BACKEND_NAMES + REPLAY_CMDS)
 
 
@@ -82,7 +79,8 @@ def run(argv, detach=False, session=None):
     this returns at once -- for hosts that must not block on audio."""
     cfg = engine.load_config()
     cmd = (argv[0] if argv else "status").lower()
-    arg = " ".join(argv[1:]).strip()
+    rest = argv[1:]
+    arg = " ".join(rest).strip()
 
     if cmd in ("status", "show"):
         return status(cfg)
@@ -90,20 +88,24 @@ def run(argv, detach=False, session=None):
         return USAGE
     if cmd == "voices":
         return list_voices(cfg)
+    if cmd == "voice" and not rest:
+        return current_voice(cfg)
     if cmd == "stop":
         engine.stop_playing()
         return "playback stopped"
     if cmd in REPLAY_CMDS:
-        return repeat(argv[1:], cfg, detach, session)
+        return repeat(rest, cfg, detach, session)
     if cmd == "say":
         if not arg:
             raise CtlError("need something to say")
         _speak(arg, cfg, detach)
         return arg
     if cmd == "test":
-        sample = arg or "Robot voice is live. This is how your replies will sound."
+        sample = arg or {"pt": "O robô está no ar. É assim que as respostas vão soar.",
+                         "en": "Robot voice is live. This is how your replies will sound."
+                         }[cfg["lang"] if cfg["lang"] in voices.LANGS else "en"]
         _speak(sample, cfg, detach)
-        return "speaking via %s: %s" % (cfg["backend"], sample)
+        return "speaking: " + sample
     if cmd == "key":
         return ("Run `robot-voice key` in a terminal. A key typed into the agent's "
                 "prompt would end up in its history.")
@@ -125,25 +127,27 @@ def run(argv, detach=False, session=None):
         if backend not in BACKENDS:
             raise CtlError("engine must be one of: " + ", ".join(BACKENDS))
         cfg["backend"] = backend
+    elif cmd == "lang":
+        lang = arg.lower() or "auto"
+        lang = {"portuguese": "pt", "pt-br": "pt", "english": "en"}.get(lang, lang)
+        if lang not in ("auto",) + voices.LANGS:
+            raise CtlError("lang must be auto, pt or en")
+        cfg["lang"] = lang
     elif cmd == "voice":
-        if not arg:
-            raise CtlError("need a voice name -- `voices` lists them")
-        cfg[_voice_key(cfg)] = arg
+        set_voice(cfg, rest)
+    elif cmd == "random":
+        choice = arg.lower()
+        if choice and choice not in ON + OFF:
+            raise CtlError("random on|off")
+        cfg["random"] = (not cfg.get("random")) if not choice else choice in ON
     elif cmd == "model":
         if not arg:
             raise CtlError("need a model id, e.g. gemini-2.5-flash-preview-tts")
         cfg["gemini_model"] = arg
     elif cmd == "style":
         cfg["style"] = (arg + " ") if arg else ""
-    elif cmd == "lang":
-        if arg.lower() in ("pt", "pt-br", "portuguese"):
-            cfg["say_voice"], cfg["kokoro_voice"], cfg["kokoro_lang"] = \
-                "Luciana", "pf_dora", "p"
-        else:
-            cfg["say_voice"], cfg["kokoro_voice"], cfg["kokoro_lang"] = \
-                "Samantha", "af_heart", "a"
     elif cmd == "reset":
-        cfg = dict(engine.DEFAULTS)
+        cfg = dict(engine.DEFAULTS, voices={})
     else:
         raise CtlError(USAGE)
 
@@ -151,9 +155,32 @@ def run(argv, detach=False, session=None):
     return status(cfg)
 
 
-def _voice_key(cfg):
-    return {"gemini": "gemini_voice", "say": "say_voice",
-            "kokoro": "kokoro_voice"}[cfg["backend"]]
+def set_voice(cfg, rest):
+    name_args = rest
+    lang = None
+    if rest and rest[0].lower() in voices.LANGS:
+        lang, name_args = rest[0].lower(), rest[1:]
+    name = " ".join(name_args).strip()
+    if not name:
+        raise CtlError("need a voice name -- `voices` lists them")
+    if name.lower() == "random":
+        cfg["random"] = True
+        return
+    backend = cfg["backend"]
+    slots = cfg.setdefault("voices", {}).setdefault(backend, {})
+    cfg["random"] = False
+    if lang is None and backend == "gemini":
+        slots["en"] = slots["pt"] = name  # Gemini voices speak both languages
+        return
+    if lang is None:
+        lang = voices.lang_of_voice(backend, name)
+    if lang is None:
+        if cfg["lang"] in voices.LANGS:
+            lang = cfg["lang"]
+        else:
+            raise CtlError("which language is %s for? use `voice pt %s` or `voice en %s`"
+                           % (name, name, name))
+    slots[lang] = name
 
 
 def _speak(text, cfg, detach, overrides=None):
@@ -165,37 +192,69 @@ def _speak(text, cfg, detach, overrides=None):
     engine.say_again(text, use)
 
 
+def _voice_line(cfg):
+    backend = cfg["backend"]
+    if cfg.get("random"):
+        return "random"
+    return "en %s · pt %s" % (voices.configured(cfg, backend, "en"),
+                              voices.configured(cfg, backend, "pt"))
+
+
+def _last_line():
+    last = engine.last_voice()
+    if not last:
+        return None
+    line = "%s %s (%s) at %s" % (last.get("engine"), last.get("voice"),
+                                 last.get("lang"), last.get("at"))
+    if last.get("failed"):
+        line += " -- after " + "; ".join(last["failed"])
+    return line
+
+
 def status(cfg):
     state = "on" if cfg["enabled"] and cfg["mode"] != "off" else "off"
     lines = [
         "speech   " + state,
         "mode     " + cfg["mode"],
-        "backend  " + cfg["backend"],
-        "voice    " + cfg[_voice_key(cfg)],
+        "engine   " + " → ".join(engine.chain(cfg)),
+        "lang     " + cfg.get("lang", "auto"),
+        "voice    " + _voice_line(cfg),
     ]
     if cfg["backend"] == "gemini" or cfg["mode"] == "smart":
         lines.append("model    " + cfg["gemini_model"])
         if cfg.get("style"):
             lines.append("style    " + cfg["style"].strip())
         _, source = keys.find(cfg)
-        lines.append("key      " + (source or "MISSING -- replies fall back to say "
+        lines.append("key      " + (source or "MISSING -- Gemini will be skipped "
                                      "(run `robot-voice key`)"))
-    issue = engine.last_log_line()
-    if issue:
-        lines.append("last     " + issue)
+    last = _last_line()
+    if last:
+        lines.append("last     " + last)
+    return "\n".join(lines)
+
+
+def current_voice(cfg):
+    backend = cfg["backend"]
+    lines = ["engine   " + backend]
+    for lang in voices.LANGS:
+        lines.append("%s       %s" % (lang, voices.configured(cfg, backend, lang)))
+    lines.append("random   " + ("on" if cfg.get("random") else "off"))
+    last = _last_line()
+    if last:
+        lines.append("last     " + last)
     return "\n".join(lines)
 
 
 def list_voices(cfg):
-    if cfg["backend"] == "gemini":
-        return "\n".join(GEMINI_VOICES)
-    if cfg["backend"] == "say":
-        if not shutil.which("say"):
-            return "macOS `say` isn't available here"
-        res = subprocess.run(["say", "-v", "?"], capture_output=True, text=True)
-        return res.stdout.rstrip()
-    return ("english: af_heart af_bella am_michael bf_emma bm_george\n"
-            "pt-br:   pf_dora pm_alex pm_santa")
+    backend = cfg["backend"]
+    out = []
+    for lang in voices.LANGS:
+        current = voices.configured(cfg, backend, lang)
+        names = voices.catalog(backend, lang)
+        marked = ["*" + n if n == current else n for n in names]
+        out.append("%s: %s" % (lang, " ".join(marked) or "(none installed)"))
+    out.append("(* = selected)")
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------------- repeat
