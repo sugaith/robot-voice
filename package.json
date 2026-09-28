@@ -11,7 +11,13 @@
   "homepage": "https://github.com/sugaith/robot-voice",
   "repository": "github:sugaith/robot-voice",
   "license": "MIT",
-  "private": true,
+  "files": [
+    "pi/",
+    "robot_voice/*.py",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
   "pi": {
     "extensions": [
       "./pi/extension.ts"
