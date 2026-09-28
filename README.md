@@ -94,8 +94,11 @@ or `pi install ./robot-voice` from a clone, which loads it in place. The
 package is `pi/extension.ts`, declared in `package.json`. It remembers the
 reply at `agent_end` and speaks it at `agent_settled`, once pi won't continue
 on its own, in the interactive TUI only, so `pi -p` scripts stay quiet.
-`/robot <command>` shows its answer as a notification. The key comes from the
-environment or the keychain, like any other agent.
+`/robot <command>` shows its answer as a notification. Anything that isn't an
+exact command (`/robot a female Portuguese voice`) goes to the agent through
+the bundled `robot-voice` skill, which also tells the agent that its replies
+are spoken and how to change the voice. The key comes from the environment or
+the keychain, like any other agent.
 
 ### The local engines (sano, Kokoro)
 
@@ -222,6 +225,7 @@ robot_voice/
   claude_code.py  Claude Code hooks: stop, command
   hermes.py       Hermes hook and slash command
 pi/extension.ts   pi extension: speech at agent_settled, /robot
+pi/skills/        the skill pi's agent uses for loosely phrased requests
 package.json      pi package manifest
 hooks/hooks.json  Claude Code hook wiring  → hooks/claude.py
 .claude-plugin/   Claude Code plugin + marketplace manifests

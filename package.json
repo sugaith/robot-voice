@@ -1,15 +1,24 @@
 {
   "name": "robot-voice",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot to control and replay it.",
-  "keywords": ["pi-package", "tts", "voice", "speech"],
+  "keywords": [
+    "pi-package",
+    "tts",
+    "voice",
+    "speech"
+  ],
   "homepage": "https://github.com/sugaith/robot-voice",
   "repository": "github:sugaith/robot-voice",
   "license": "MIT",
   "private": true,
   "pi": {
-    "extensions": ["./pi/extension.ts"],
-    "skills": [],
+    "extensions": [
+      "./pi/extension.ts"
+    ],
+    "skills": [
+      "./pi/skills"
+    ],
     "prompts": [],
     "themes": []
   },

@@ -70,17 +70,26 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("robot", {
 		description: "Robot voice: speak replies out loud -- /robot help",
 		handler: async (args, ctx) => {
+			const request = args.trim();
 			const argv = ["-m", "robot_voice", "--detach",
 				"--session", `pi-${ctx.sessionManager.getSessionId()}`,
-				...(args.trim() ? args.trim().split(/\s+/) : [])];
-			await new Promise<void>((resolve) => {
+				...(request ? request.split(/\s+/) : [])];
+			const failed = await new Promise<boolean>((resolve) => {
 				execFile(PYTHON, argv, { cwd: ROOT, env: env(), timeout: 15000 },
 					(err, stdout, stderr) => {
+						if (err && request) return resolve(true);
 						const out = (stdout || "").trim() || (stderr || "").trim()
 							|| (err ? String(err.message) : "done");
 						ctx.ui.notify(out, err ? "error" : "info");
-						resolve();
+						resolve(false);
 					});
+			});
+			if (!failed) return;
+			// Not an exact command ("talk slower", "a female voice"): hand it to
+			// the agent through the skill, like Claude Code's /robot does.
+			pi.sendUserMessage(`/skill:robot-voice ${request}`, {
+				expandPromptTemplates: true,
+				...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
 			});
 		},
 	});
