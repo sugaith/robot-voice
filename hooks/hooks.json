@@ -19,7 +19,7 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^robot-voice:(use|voice|all|tldr|brief|help)$",
+        "matcher": "^robot-voice:(use|voice|all|tldr|brief|vol|help)$",
         "hooks": [
           {
             "type": "command",

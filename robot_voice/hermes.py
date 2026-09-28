@@ -18,9 +18,10 @@ DESCRIPTIONS = {
     "all": "Robot voice: say the last reply again, all of it",
     "tldr": "Robot voice: the last reply as one short sentence",
     "brief": "Robot voice: the last reply's first sentence again",
+    "vol": "Robot voice: how loud, 0 to 10 (5 is normal)",
     "help": "Robot voice: the commands",
 }
-ARGS_HINTS = {"use": "<engine> [voice] | <voice>", "voice": "[name]"}
+ARGS_HINTS = {"use": "<engine> [voice] | <voice>", "voice": "[name]", "vol": "[0-10]"}
 
 # Hermes has no skill index for plugins, so the agent learns about its voice here.
 PROMPT = (
@@ -30,7 +31,7 @@ PROMPT = (
     "`%s --session %s <command>` and report its output. Changes apply to this "
     "session; put `agent` or `global` right after the command to widen them. Commands: use <engine> [voice] "
     "(gemini, sano, kokoro, say), voice [name], voices, on, off, mode "
-    "brief|prose|smart, lang auto|pt|en, random on|off, repeat [all|smart|slow|<n>], "
+    "brief|prose|smart, vol 0-10 (5 normal), lang auto|pt|en, random on|off, repeat [all|smart|slow|<n>], "
     "status; `help all` lists everything. Female Portuguese voice: kokoro pf_dora "
     "or say Luciana. Never ask for an API key in chat."
 )

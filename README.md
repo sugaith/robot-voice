@@ -151,6 +151,7 @@ before the colon, Hermes and pi use `robot`:
 | `/robot-voice:all` | `/robot:all` | say the last reply again, all of it |
 | `/robot-voice:tldr` | `/robot:tldr` | ...as one short sentence (Gemini; without a key, the first one) |
 | `/robot-voice:brief` | `/robot:brief` | ...its first sentence and closing question |
+| `/robot-voice:vol 7` | `/robot:vol 7` | how loud, 0 to 10: 5 is normal, 10 twice as loud, 0 silent |
 | `/robot-voice:help` | `/robot:help` | these, in a few lines |
 
 Exact commands never reach the model: they run locally and show their answer in
@@ -211,8 +212,8 @@ Measured on a typical reply (137 chars, ~9s of audio) with
 
 ## Sessions, agents, and global
 
-Every setting a command changes (engine, voice, language, mode, random,
-on/off, style) is saved in one of three layers, and the most specific wins:
+Every setting a command changes (engine, voice, volume, language, mode,
+random, on/off, style) is saved in one of three layers, and the most specific wins:
 
 | layer | set with | reaches |
 |---|---|---|
@@ -271,6 +272,11 @@ bin/robot-voice   the CLI (on Claude's Bash PATH while the plugin is enabled)
   after `off`, and five sessions at once each replay their own. A reply that's
   identical to the last one isn't spoken again; Claude Code re-fires `Stop` on
   `/clear`, resume and compact.
+- Every clip is normalized to the same peak level before it plays, so the
+  engines sound equally loud (sano's raw output peaks at about a third of
+  full scale). `vol` then scales playback: `afplay -v`, where 5 is 1.0. `say`
+  renders to a file first and plays the same way, since on its own it can
+  only get quieter.
 - Playback goes through one queue for every agent and session: a reply that
   finishes while another is being spoken waits its turn. `stop` ends the
   current clip and drops the queue.

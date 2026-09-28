@@ -56,9 +56,17 @@ def kokoro(text, voice, scale):
 ENGINES = {"sano": sano, "kokoro": kokoro}
 
 
+PEAK = 0.9       # every clip is brought to this peak, so engines sound equally loud
+MAX_GAIN = 8.0   # but near-silence isn't blown up into hiss
+
+
 def write_wav(path, audio, rate):
     import numpy as np
-    pcm = (np.clip(np.asarray(audio, dtype=np.float32), -1, 1) * 32767).astype("<i2")
+    audio = np.asarray(audio, dtype=np.float32)
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 0:
+        audio = audio * min(PEAK / peak, MAX_GAIN)
+    pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)

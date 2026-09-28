@@ -19,6 +19,7 @@ const COMMANDS: Record<string, string> = {
 	all: "Robot voice: say the last reply again, all of it",
 	tldr: "Robot voice: the last reply as one short sentence",
 	brief: "Robot voice: the last reply's first sentence again",
+	vol: "Robot voice: how loud, 0 to 10 (5 is normal, 10 twice as loud)",
 	help: "Robot voice: the commands",
 };
 

@@ -17,6 +17,7 @@ BACKEND_CMDS = ("use", "backend", "provider", "engine")
 BACKEND_NAMES = ("gemini", "sano", "kokoro")
 REPLAY_CMDS = ("repeat", "again")
 REPLAY_MODES = ("brief", "prose", "smart")
+VOLUME_CMDS = ("volume", "vol")
 ON = ("on", "yes", "true", "1")
 OFF = ("off", "no", "false", "0")
 
@@ -66,12 +67,13 @@ SLOW = {"style": "Say this slowly and clearly, with pauses: ", "say_rate": 145,
 COMMANDS = frozenset(
     ("status", "show", "help", "on", "off", "mode", "voice", "voices", "model",
      "style", "lang", "random", "test", "stop", "reset", "key", "say")
+    + VOLUME_CMDS
     + MODES + BACKEND_CMDS + BACKEND_NAMES + REPLAY_CMDS)
 
 
 # Commands that change a setting, and so take a scope.
 SETTINGS = frozenset(("on", "off", "mode", "voice", "lang", "random", "model", "style",
-                      "reset") + MODES + BACKEND_CMDS + BACKEND_NAMES)
+                      "reset") + VOLUME_CMDS + MODES + BACKEND_CMDS + BACKEND_NAMES)
 
 
 class CtlError(Exception):
@@ -91,6 +93,7 @@ HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
   {p}all                    say the last reply again, all of it
   {p}tldr                   ...as one short sentence (Gemini; else the first one)
   {p}brief                  ...its first sentence and closing question
+  {p}vol [0-10]             how loud: 5 is normal, 10 twice as loud, 0 silent
   {p}help                   this
 
 Changes stay in this session. Add `agent` (every session of this agent) or
@@ -111,6 +114,7 @@ SHORTCUTS = {
     "all": ["repeat", "all"],
     "tldr": ["repeat", "smart"],
     "brief": ["repeat", "brief"],
+    "vol": ["volume"],
     "help": ["help"],
 }
 
@@ -208,6 +212,16 @@ def run(argv, detach=False, session=None):
         cfg["lang"] = lang
     elif cmd == "voice":
         set_voice(cfg, rest)
+    elif cmd in VOLUME_CMDS:
+        if not arg:
+            return "volume   %s/10" % _level(cfg)
+        try:
+            level = float(arg.replace(",", "."))
+        except ValueError:
+            raise CtlError("volume is 0 to 10 (5 is normal, 10 twice as loud)")
+        if not 0 <= level <= 10:
+            raise CtlError("volume is 0 to 10 (5 is normal, 10 twice as loud)")
+        cfg["volume"] = int(level) if level == int(level) else level
     elif cmd == "random":
         choice = arg.lower()
         if choice and choice not in ON + OFF:
@@ -348,11 +362,17 @@ def _where(session):
     return " · ".join(parts) or None
 
 
+def _level(cfg):
+    level = cfg.get("volume", engine.VOLUME_NORMAL)
+    return int(level) if float(level) == int(float(level)) else level
+
+
 def status(cfg, session=None):
     state = "on" if cfg["enabled"] and cfg["mode"] != "off" else "off"
     lines = [
         "speech   " + state,
         "mode     " + cfg["mode"],
+        "volume   %s/10" % _level(cfg),
         "engine   " + " → ".join(engine.chain(cfg)),
         "lang     " + cfg.get("lang", "auto"),
         "voice    " + _voice_line(cfg),

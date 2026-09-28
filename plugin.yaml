@@ -1,5 +1,5 @@
 name: robot-voice
-version: 0.5.0
+version: 0.6.0
 description: "Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot:use, :voice, :all, :tldr, :brief and :help."
 author: Sugaith
 manifest_version: 2

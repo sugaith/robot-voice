@@ -5,6 +5,7 @@ Python environment), and say (macOS built-in, always the last fallback).
 Config and runtime state live in $ROBOT_VOICE_HOME (default ~/.robot-voice),
 shared by every agent the adapters wire up, so they all speak with one voice.
 """
+import array
 import base64
 import fcntl
 import hashlib
@@ -15,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
@@ -48,6 +50,7 @@ DEFAULTS = {
     "fallbacks": ["sano", "kokoro"],
     "lang": "auto",             # auto | en | pt
     "random": False,            # a random voice for every reply
+    "volume": 5,                # 0-10; 5 plays clips as is, 10 twice as loud
     "voices": {},               # {engine: {en: voice, pt: voice}}, over the defaults
     "local_python": "",         # python with sanotts/kokoro; found automatically
     "gemini_model": "gemini-2.5-flash-preview-tts",
@@ -212,7 +215,7 @@ def remember_reply(sid, raw):
 # Settings a session or an agent can override. Everything else (the key, the
 # local Python, Hermes' platforms) is machine-wide.
 LAYERED = ("enabled", "mode", "backend", "fallbacks", "lang", "random", "voices",
-           "style", "gemini_model")
+           "style", "gemini_model", "volume")
 SCOPES = ("session", "agent", "global")
 
 
@@ -443,10 +446,25 @@ def _run_player(argv):
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def play(path):
+VOLUME_NORMAL = 5  # on the 0-10 scale; 10 is twice as loud, 0 is silent
+
+
+def gain(cfg):
+    """The playback multiplier for the 0-10 volume: 5 plays the clip as is."""
+    try:
+        level = float(cfg.get("volume", VOLUME_NORMAL))
+    except (TypeError, ValueError):
+        level = VOLUME_NORMAL
+    return max(0.0, min(level, 10.0)) / VOLUME_NORMAL
+
+
+def play(path, cfg=None):
+    level = gain(cfg or {})
+    if level == 0:
+        return  # volume 0: silent, but the clip still counts as spoken
     if not shutil.which("afplay"):
         raise RuntimeError("no audio player (afplay) found")
-    _run_player(["afplay", path])
+    _run_player(["afplay", "-v", "%.2f" % level, path])
 
 
 WAV_ENGINES = ("gemini", "sano", "kokoro")
@@ -520,8 +538,23 @@ def replay(text, cfg):
     if os.environ.get("ROBOT_VOICE_DRYRUN"):
         _dry_run("replay", voice, text)
         return True
-    play(clip_path(key))
+    play(clip_path(key), cfg)
     return True
+
+
+PEAK = 0.9
+MAX_GAIN = 8.0
+
+
+def normalize(pcm):
+    """16-bit mono PCM brought to a 0.9 peak, the same level the local
+    engines write, so every engine plays equally loud at the same volume."""
+    samples = array.array("h", pcm)
+    peak = max((abs(x) for x in samples), default=0)
+    if not peak:
+        return pcm
+    scale = min(PEAK * 32767 / peak, MAX_GAIN)
+    return array.array("h", (max(-32768, min(32767, int(x * scale))) for x in samples)).tobytes()
 
 
 def write_wav(pcm, path, rate=24000):
@@ -554,16 +587,32 @@ def speak_gemini(text, cfg, voice, out):
     m = re.search(r"rate=(\d+)", inline.get("mimeType", ""))
     if m:
         rate = int(m.group(1))
-    write_wav(base64.b64decode(inline["data"]), out, rate)
+    write_wav(normalize(base64.b64decode(inline["data"])), out, rate)
 
 
 def speak_say(text, cfg, voice, out=None):
     if not shutil.which("say"):
         raise RuntimeError("macOS `say` not found")
-    argv = ["say", "-v", voice]
-    if cfg.get("say_rate"):
-        argv += ["-r", str(cfg["say_rate"])]
-    _run_player(argv + [text])
+    if gain(cfg) == 0:
+        return
+    # Rendered to a file first, so it plays through afplay at the same volume
+    # as every other engine: `say` itself can only get quieter, not louder.
+    os.makedirs(CLIPS_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(suffix=".aiff", dir=CLIPS_DIR)
+    os.close(fd)
+    try:
+        argv = ["say", "-v", voice, "-o", tmp]
+        if cfg.get("say_rate"):
+            argv += ["-r", str(cfg["say_rate"])]
+        res = subprocess.run(argv + [text], capture_output=True, text=True, timeout=60)
+        if res.returncode != 0:
+            raise RuntimeError(res.stderr.strip() or "say exited %d" % res.returncode)
+        play(tmp, cfg)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 LOCAL_PYTHON_CANDIDATES = (
@@ -662,7 +711,7 @@ def speak(text, cfg):
         record_last(engine=engine, voice=voice, lang=lang, text=text, failed=failures, key=key)
         if out:
             _prune_clips()
-            play(out)
+            play(out, cfg)
         return engine
     raise RuntimeError("no engine could speak: " + "; ".join(failures))
 

@@ -48,6 +48,7 @@ and `/robot:help`: exact commands run instantly without you, and
 | "test it" | `test` |
 | "repeat", "say that again", "I missed that" | `repeat` |
 | "read the whole thing again", "all of it" | `repeat all` |
+| "louder" / "quieter" / "too loud" | `vol <0-10>` (5 is normal; check `vol` first) |
 | "slower", "I couldn't follow" | `repeat slow` |
 | "what did you say before that" | `repeat 2` (or `3`, ...) |
 | "what have you been saying" | `repeat list` |

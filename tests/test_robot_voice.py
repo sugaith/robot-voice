@@ -444,5 +444,50 @@ class Queue(unittest.TestCase):
         second.join()
         self.assertLess(done[0] - t0, 1.5)  # the queued 2s sleep never ran
 
+
+class Volume(Base):
+    def test_scale_maps_to_playback_gain(self):
+        for level, expected in ((0, 0.0), (5, 1.0), (7, 1.4), (10, 2.0), (6.5, 1.3)):
+            self.assertAlmostEqual(engine.gain({"volume": level}), expected)
+
+    def test_play_passes_the_gain_and_zero_stays_silent(self):
+        calls = []
+        saved = engine._run_player
+        engine._run_player = calls.append
+        try:
+            engine.play("clip.wav", {"volume": 8})
+            engine.play("clip.wav", {"volume": 0})
+        finally:
+            engine._run_player = saved
+        self.assertEqual(calls, [["afplay", "-v", "1.60", "clip.wav"]])
+
+    def test_vol_command_scopes_like_everything_else(self):
+        out = claude_code.command({"command_name": "robot-voice:vol",
+                                   "command_args": "8", "session_id": "V"})
+        self.assertIn("volume   8/10", out["reason"])
+        self.assertEqual(engine.config_for("claude:V")["volume"], 8)
+        self.assertEqual(engine.load_config()["volume"], 5)
+        ctl.run(["vol", "global", "6,5"], session="claude:V")
+        self.assertEqual(engine.load_config()["volume"], 6.5)
+        self.assertEqual(engine.config_for("claude:V")["volume"], 8)  # the session's own wins
+        self.assertEqual(engine.config_for("pi:W")["volume"], 6.5)
+
+    def test_vol_shows_the_level_and_rejects_nonsense(self):
+        self.assertEqual(ctl.run(["vol"]), "volume   5/10")
+        with self.assertRaises(ctl.CtlError):
+            ctl.run(["vol", "11"])
+        self.assertIsNone(claude_code.command({"command_name": "robot-voice:vol",
+                                               "command_args": "louder please"}))
+
+    def test_quiet_clips_are_normalized(self):
+        import array
+        quiet = array.array("h", [0, 3000, -9000, 6000]).tobytes()
+        loud = array.array("h", engine.normalize(quiet))
+        self.assertEqual(max(abs(x) for x in loud), int(0.9 * 32767 / 9000 * 9000))
+        silence = array.array("h", [0, 0]).tobytes()
+        self.assertEqual(engine.normalize(silence), silence)
+        hiss = array.array("h", [10, -20]).tobytes()  # near-silence isn't blown up
+        self.assertEqual(max(abs(x) for x in array.array("h", engine.normalize(hiss))), 160)
+
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,7 @@ kokoro`); for every agent (Claude, Hermes, pi), put `global`.
 | "always speak Portuguese" / "English" / "detect it" | `lang pt` / `lang en` / `lang auto` |
 | "sound calmer/excited/etc" (Gemini) | `style Say it <adjective>:` |
 | "say that again" / "all of it" / "in short" | `repeat` / `repeat all` / `repeat smart` |
+| "louder" / "quieter" / "too loud" | `vol <0-10>` (5 is normal; check `vol` first) |
 | "slower" | `repeat slow` |
 | "what did you say before that" | `repeat 2` (or `3`, ...) |
 | "say <something>" | `say <something>` |
