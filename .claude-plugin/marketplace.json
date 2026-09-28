@@ -1,0 +1,14 @@
+{
+  "name": "robot-voice",
+  "description": "Robot Voice: spoken replies for Claude Code.",
+  "owner": {
+    "name": "Sugaith"
+  },
+  "plugins": [
+    {
+      "name": "robot-voice",
+      "source": "./",
+      "description": "Speaks Claude's replies out loud, with /speak to control and replay them."
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+name: robot-voice
+version: 0.1.0
+description: "Speaks each finished reply out loud (Gemini, macOS say, or local Kokoro), with /speak to control and replay it."
+author: Sugaith
+manifest_version: 2
+api_version: 1
+kind: standalone
+requires_hermes: ">=0.20.0"
+license: MIT
+homepage: https://github.com/sugaith/robot-voice
+tags: [voice, tts, speech, accessibility]
+platforms: [macos]
+provides_tools: []
+provides_hooks:
+  - post_llm_call
+requires_env: []
+config_schema:
+  gemini_api_key:
+    type: secret
+    env: GEMINI_API_KEY
+    label: Gemini API key
+    description: "For the Gemini voices, from aistudio.google.com/apikey. Leave empty to use the free macOS voice."
+    required: false
