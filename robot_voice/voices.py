@@ -39,14 +39,19 @@ DEFAULT_VOICES = {
 }
 
 # Words that carry every sentence and exist in only one of the two languages.
+# Anything that is also an English word ("as", "no", "do", "um") stays out:
+# one of those tipped "committed as d57f2bd" into Portuguese.
 PT_WORDS = frozenset(
-    "o e quer pronto feito certo beleza que não é de do da dos das um uma para com os as você está isso isto mas "
-    "se no na nos nas por pra também já ainda quando como sim foi são vai tem "
-    "ele ela eu ao aos à mais muito seu sua esse essa este esta então agora".split())
+    "o e quer pronto feito certo beleza que não é de da dos das uma para com os "
+    "você está isso isto mas se na nos nas por pra também já ainda quando como "
+    "sim foi são vai tem ele ela eu ao aos à mais muito seu sua esse essa este "
+    "esta então agora".split())
 EN_WORDS = frozenset(
-    "done okay sure yes the is and to of a you it that this for with are not be on in can but i "
-    "was will have has what if do does an at by from or so all just now then "
-    "there here which would should could your my we they".split())
+    "done okay sure yes the is and to of a you it that this for with are not be "
+    "on in can but i was will have has what if does an at by from or so all just "
+    "now then there here which would should could your my we they both also "
+    "fixed added".split())
+assert not PT_WORDS & EN_WORDS
 PT_MARKS_RE = re.compile(r"[ãõçáéíóúâêôà]", re.I)
 WORD_RE = re.compile(r"[^\W\d_]+", re.U)
 

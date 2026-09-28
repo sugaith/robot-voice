@@ -229,6 +229,12 @@ class Routing(Base):
         engine.handle_reply("Fixed the bug in the hook.", "l4")
         self.assertEqual(spoken()[0][1], "Luciana")
 
+    def test_words_shared_with_english_do_not_count_as_portuguese(self):
+        from robot_voice import voices
+        self.assertEqual(voices.detect("Fixed both in pi; committed as d57f2bd."), "en")
+        self.assertEqual(voices.detect("No, do it as planned."), "en")
+        self.assertFalse(voices.PT_WORDS & voices.EN_WORDS)
+
     def test_code_terms_do_not_tip_portuguese_to_english(self):
         from robot_voice import voices
         self.assertEqual(voices.detect(
