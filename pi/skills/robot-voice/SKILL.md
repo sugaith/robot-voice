@@ -10,10 +10,10 @@ Every reply you finish is spoken out loud: robot-voice shapes it for the ear
 don't need to do anything for that to happen. This skill is how you change
 how it sounds, or replay something.
 
-Run the CLI that ships with this skill (the path is relative to this file):
+Run the CLI (the robot-voice extension puts it on your PATH):
 
 ```
-../../../bin/robot-voice <command>
+robot-voice <command>
 ```
 
 Report its output verbatim. `help` lists every command, `repeat help` the

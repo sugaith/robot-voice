@@ -51,6 +51,13 @@ function speak(text: string, session: string): void {
 }
 
 export default function (pi: ExtensionAPI) {
+	// The skill runs `robot-voice <command>`; put the CLI on the PATH that pi's
+	// bash tool inherits, like Claude Code does with a plugin's bin/.
+	const bin = path.join(ROOT, "bin");
+	if (!(process.env.PATH || "").split(path.delimiter).includes(bin)) {
+		process.env.PATH = `${bin}${path.delimiter}${process.env.PATH || ""}`;
+	}
+
 	let pending = "";
 
 	// agent_end fires after each low-level run; pi may still retry, compact or
