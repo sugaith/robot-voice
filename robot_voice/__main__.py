@@ -21,17 +21,19 @@ def set_key(argv):
 
 
 def _options(argv):
-    """Leading --detach / --session ID, for agents that call the CLI: speak in
-    the background, and replay the caller's own session."""
-    detach, session = False, None
+    """Leading flags for agents that call the CLI: --detach (speak in the
+    background), --session ID (replay the caller's own session), and
+    --shortcut NAME --prefix P (run the agent's /<P><NAME> slash command)."""
+    opts = {"detach": False, "session": None, "shortcut": None, "prefix": "robot-voice "}
     while argv[:1] and argv[0].startswith("--"):
-        if argv[0] == "--detach":
-            detach, argv = True, argv[1:]
-        elif argv[0] == "--session" and len(argv) > 1:
-            session, argv = argv[1], argv[2:]
+        flag = argv[0][2:]
+        if flag == "detach":
+            opts["detach"], argv = True, argv[1:]
+        elif flag in ("session", "shortcut", "prefix") and len(argv) > 1:
+            opts[flag], argv = argv[1], argv[2:]
         else:
             break
-    return detach, session, argv
+    return opts, argv
 
 
 def main(argv=None):
@@ -39,12 +41,15 @@ def main(argv=None):
     if argv[:1] == ["_job"]:
         engine.run_job(json.load(sys.stdin))
         return 0
-    detach, session, argv = _options(argv)
+    opts, argv = _options(argv)
     try:
-        if argv[:1] == ["key"]:
+        if opts["shortcut"] in ctl.SHORTCUTS:
+            out = ctl.shortcut(opts["shortcut"], " ".join(argv), opts["prefix"],
+                               detach=opts["detach"], session=opts["session"])
+        elif argv[:1] == ["key"]:
             out = set_key(argv[1:])
         else:
-            out = ctl.run(argv, detach=detach, session=session)
+            out = ctl.run(argv, detach=opts["detach"], session=opts["session"])
     except (ctl.CtlError, RuntimeError, ValueError) as e:
         print(e, file=sys.stderr)
         return 1

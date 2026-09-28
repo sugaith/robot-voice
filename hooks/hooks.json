@@ -19,7 +19,7 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^(robot|robot-voice:(robot|status|on|off|stop|use|voice|voices|lang|mode|random|repeat|say|test))$",
+        "matcher": "^robot-voice:(use|voice|all|tldr|brief|help)$",
         "hooks": [
           {
             "type": "command",

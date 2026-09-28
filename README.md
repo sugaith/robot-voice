@@ -5,14 +5,14 @@ Your coding agent reads its replies out loud, in English or Portuguese.
 When the agent finishes a turn, robot-voice takes the reply, strips everything
 that sounds terrible spoken (code blocks, tables, file paths, emoji), shortens
 it to what you'd want to hear, works out whether it's Portuguese or English,
-and speaks it in that language's voice. `/robot` controls it and replays
-anything already said.
+and speaks it in that language's voice. `/robot-voice:use`, `:voice`, `:all`,
+`:tldr`, `:brief` and `:help` control it and replay what was said.
 
-| Agent | How it hooks in | `/robot` |
+| Agent | How it hooks in | commands |
 |---|---|---|
-| **Claude Code** | plugin: `Stop` hook | answered by a hook, no model turn |
-| **Hermes Agent** | plugin: `post_llm_call` hook | native slash command, no model turn |
-| **pi** | package: `agent_end` + `agent_settled` | native slash command, no model turn |
+| **Claude Code** | plugin: `Stop` hook | `/robot-voice:<command>`, answered by a hook |
+| **Hermes Agent** | plugin: `post_llm_call` hook | `/robot:<command>`, native |
+| **pi** | package: `agent_end` + `agent_settled` | `/robot:<command>`, native |
 | anything else | `robot-voice` CLI | `robot-voice <command>` |
 
 One repo is both plugins. Config and voices live once in `~/.robot-voice/`,
@@ -30,7 +30,7 @@ so every agent speaks with the same voice.
 If the chosen engine fails, the next one in the chain takes over, and macOS
 `say` is always the last resort. The default chain is
 `gemini → sano → kokoro → say`. Choosing `say` directly means only `say`.
-`/robot status` shows the chain and what actually spoke last, including what
+`robot-voice status` shows the chain and what actually spoke last, including what
 failed before it.
 
 Measured on an M3 Max, from a fresh process with the models downloaded.
@@ -56,7 +56,7 @@ Every engine keeps one voice per language:
 | `kokoro` | af_heart | pf_dora |
 | `say` | Samantha | Luciana |
 
-`/robot lang pt` or `/robot lang en` pins one language instead.
+`robot-voice lang pt` or `lang en` pins one language instead.
 
 ## Install
 
@@ -94,10 +94,11 @@ or `pi install ./robot-voice` from a clone, which loads it in place. The
 package is `pi/extension.ts`, declared in `package.json`. It remembers the
 reply at `agent_end` and speaks it at `agent_settled`, once pi won't continue
 on its own, in the interactive TUI only, so `pi -p` scripts stay quiet.
-`/robot <command>` shows its answer as a notification. Anything that isn't an
-exact command (`/robot a female Portuguese voice`) goes to the agent through
-the bundled `robot-voice` skill, which also tells the agent that its replies
-are spoken and how to change the voice. The key comes from the environment or
+`/robot:<command>` shows its answer as a notification. `/robot:use` in plain
+words (`/robot:use a female Portuguese voice`) goes to the agent through the
+bundled `robot-voice` skill, which also tells the agent that its replies are
+spoken and how to change the voice. The extension puts `robot-voice` on the
+PATH pi's tools inherit. The key comes from the environment or
 the keychain, like any other agent.
 
 ### The local engines (sano, Kokoro)
@@ -136,48 +137,50 @@ your voice carries over. Remove the old wiring or every reply is spoken twice:
 
 ## Commands
 
+The same six commands in every agent. Claude Code puts the plugin's name
+before the colon, Hermes and pi use `robot`:
+
+| Claude Code | Hermes, pi | does |
+|---|---|---|
+| `/robot-voice:use kokoro pf_dora` | `/robot:use kokoro pf_dora` | switch engine, and optionally the voice |
+| `/robot-voice:use heart` | `/robot:use heart` | a voice name alone also picks its engine |
+| `/robot-voice:use <plain words>` | `/robot:use <plain words>` | "a female Portuguese voice": the agent maps it |
+| `/robot-voice:voice [name]` | `/robot:voice [name]` | show the current voices, or set one |
+| `/robot-voice:all` | `/robot:all` | say the last reply again, all of it |
+| `/robot-voice:tldr` | `/robot:tldr` | ...as one short sentence (Gemini; without a key, the first one) |
+| `/robot-voice:brief` | `/robot:brief` | ...its first sentence and closing question |
+| `/robot-voice:help` | `/robot:help` | these, in a few lines |
+
+Exact commands never reach the model: they run locally and show their answer in
+place of a turn, with no tokens and no interpretation. Claude Code labels those
+answers "blocked by hook". That's the mechanism, not an error. `use` in plain
+words goes to the agent: in Claude Code and pi through the bundled skill; in
+Hermes, whose plugin commands can only return text, you ask in the chat, and
+the agent knows about robot-voice from a short section the plugin adds to its
+prompt. In all three, the agent also knows its replies are spoken, so "fala
+mais devagar" or "use the Mac voice" in a normal message works too.
+
+Everything else lives in the CLI, `robot-voice <command>`, which the agents run
+for you:
+
 ```
-/robot                          # status: engine chain, voices, what spoke last
-/robot on | off
-/robot mode prose|brief|smart   # how much gets spoken
-/robot use gemini|sano|kokoro|say
-/robot sano                     # same as `use sano` (also gemini, kokoro)
-/robot lang auto|pt|en
-
-/robot voice                    # the current voices, and the one heard last
-/robot voice pm_alex            # set a voice; the name decides its language slot
-/robot voice en Zarvox          # or name the slot yourself
-/robot voices                   # the active engine's voices, per language
-/robot random on|off            # a random voice for every reply
-
-/robot model <id>               # Gemini TTS model
-/robot style Say it calm:       # Gemini delivery direction ("" clears)
-/robot test [text]
-/robot stop                     # kill playback
-/robot reset
-
-/robot repeat                   # last spoken line again, verbatim
-/robot repeat all               # the full last reply, uncapped
-/robot repeat brief|prose|smart # re-shape the last reply
-/robot repeat slow
-/robot repeat 3                 # three replies back
-/robot repeat list              # recent replies, without speaking
-/robot repeat show [cmd]        # print instead of speaking
-/robot say hello there          # arbitrary words
+robot-voice status                    # engine chain, voices, what spoke last
+robot-voice on | off
+robot-voice mode prose|brief|smart    # how much gets spoken
+robot-voice lang auto|pt|en
+robot-voice voice en Zarvox           # set a voice for one language explicitly
+robot-voice voices                    # the active engine's voices, per language
+robot-voice random on|off             # a random voice for every reply
+robot-voice model <id>                # Gemini TTS model
+robot-voice style Say it calm:        # Gemini delivery direction ("" clears)
+robot-voice test [text]
+robot-voice stop                      # kill playback
+robot-voice reset
+robot-voice repeat [slow|<n>|list|show]
+robot-voice say hello there           # arbitrary words
+robot-voice key                       # store a Gemini key in the keychain
+robot-voice help all                  # every command
 ```
-
-In Claude Code every command has the plugin's prefix: `/robot-voice:robot use
-sano`, or the shortcut skills `/robot-voice:use sano`, `/robot-voice:voice`,
-`/robot-voice:repeat 2`, and likewise `:status`, `:on`, `:off`, `:stop`,
-`:voices`, `:lang`, `:mode`, `:random`, `:say` and `:test`. An exact command like `/robot off` never reaches
-the model: a `UserPromptExpansion` hook runs it and shows the result in place
-of a turn, with no tokens and no interpretation. Claude Code labels those
-answers "blocked by hook". That's the mechanism, not an error. Anything else,
-like `/robot talk a bit slower`, goes to the model, which maps it through the
-skill.
-
-The same commands work as `robot-voice <command>` in a terminal, plus
-`robot-voice key`.
 
 ## The Gemini key
 
@@ -189,8 +192,7 @@ first source found wins:
 3. the macOS keychain: run `robot-voice key` in a terminal to store it there
 4. `gemini_api_key` in `~/.robot-voice/config.json`
 
-Never type the key into an agent's prompt. `/robot key` refuses it and points
-you here, because the prompt ends up in the agent's history.
+Never type the key into an agent's prompt. The agents are told to refuse it, because the prompt ends up in the agent's history.
 
 Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 Measured on a typical reply (137 chars, ~9s of audio) with
@@ -220,16 +222,16 @@ robot_voice/
   engine.py       cleanup, shaping, the engine chain, playback, per-session history
   voices.py       language detection, voice catalogs, per-language and random picks
   local_tts.py    sano and Kokoro, run inside the local Python environment
-  ctl.py          the /robot commands, returning text for any surface to show
+  ctl.py          the commands and the six slash-command shortcuts, as text for any surface
   keys.py         where the Gemini key comes from
   claude_code.py  Claude Code hooks: stop, command
   hermes.py       Hermes hook and slash command
-pi/extension.ts   pi extension: speech at agent_settled, /robot
+pi/extension.ts   pi extension: speech at agent_settled, /robot:<command>
 pi/skills/        the skill pi's agent uses for loosely phrased requests
 package.json      pi package manifest
 hooks/hooks.json  Claude Code hook wiring  → hooks/claude.py
 .claude-plugin/   Claude Code plugin + marketplace manifests
-skills/           robot (loose phrasing, for Claude) + one shortcut per command
+skills/           one per /robot-voice:<command>; `use` is also the one Claude sees
 plugin.yaml       Hermes manifest          → __init__.py
 bin/robot-voice   the CLI (on Claude's Bash PATH while the plugin is enabled)
 ```
@@ -238,7 +240,7 @@ bin/robot-voice   the CLI (on Claude's Bash PATH while the plugin is enabled)
   `last_assistant_message`, so nothing reads the transcript and nothing races
   its writer. The hook runs `async`, so speech never blocks a turn.
 - **Hermes** runs hooks and commands inside its own process, so the adapter
-  never waits on audio. Every reply and every `/robot test` is spoken by a
+  never waits on audio. Every reply and every replay is spoken by a
   detached child using Hermes' own interpreter, so no `python3` is needed on
   `PATH`.
 - **The core is stdlib-only.** sano and Kokoro run as a subprocess in the local
@@ -262,7 +264,7 @@ from robot_voice import engine, ctl
 
 engine.handle_reply(reply_text, session_id)     # shapes and speaks; blocks while playing
 engine.spawn({"op": "reply", "text": reply_text, "session": session_id})  # same, detached
-ctl.run(argv, detach=True, session=session_id)  # a /robot command → text to show
+ctl.shortcut("use", "kokoro pf_dora", "/robot:")  # a slash command → text to show
 ```
 
 From outside Python, pipe the reply into a detached `python3 -m robot_voice _job`
@@ -279,7 +281,7 @@ curated catalog: a PR to `NousResearch/hermes-agent` adding
 name: robot-voice
 repo: https://github.com/sugaith/robot-voice
 sha: <40-hex commit sha>
-description: Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot to control and replay it.
+description: Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot:<command> to control and replay it.
 maintainer: sugaith
 tier: community
 category: voice

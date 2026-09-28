@@ -8,7 +8,7 @@
     {
       "name": "robot-voice",
       "source": "./",
-      "description": "Speaks Claude's replies out loud, with /robot to control and replay them."
+      "description": "Speaks Claude's replies out loud, with /robot-voice:use, :voice, :all, :tldr, :brief and :help."
     }
   ]
 }

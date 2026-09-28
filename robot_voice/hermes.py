@@ -1,18 +1,38 @@
-"""Hermes Agent adapter: a post_llm_call hook and a native /robot command.
+"""Hermes Agent adapter: a post_llm_call hook and native /robot:<command>s.
 
 Hermes runs both inside its own process, so neither may wait on audio. Every
 reply is spoken by a detached child running Hermes' own interpreter; the
 command returns its text at once and Hermes shows it without a model turn.
 """
 import logging
-import shlex
+import os
 
 from . import ctl, engine
 
 logger = logging.getLogger(__name__)
 
-DESCRIPTION = "Robot voice: speaks replies out loud -- /robot help"
-ARGS_HINT = "[status|on|off|mode|use|lang|voice|random|repeat|say|help]"
+PREFIX = "/robot:"
+DESCRIPTIONS = {
+    "use": "Robot voice: switch engine or voice",
+    "voice": "Robot voice: show or set the voice",
+    "all": "Robot voice: say the last reply again, all of it",
+    "tldr": "Robot voice: the last reply as one short sentence",
+    "brief": "Robot voice: the last reply's first sentence again",
+    "help": "Robot voice: the commands",
+}
+ARGS_HINTS = {"use": "<engine> [voice] | <voice>", "voice": "[name]"}
+
+# Hermes has no skill index for plugins, so the agent learns about its voice here.
+PROMPT = (
+    "Your replies are spoken out loud by the robot-voice plugin (it detects "
+    "Portuguese or English per reply). When the user asks to change the voice, "
+    "engine, language or how much is spoken, or to hear something again, run "
+    "`%s <command>` and report its output. Commands: use <engine> [voice] "
+    "(gemini, sano, kokoro, say), voice [name], voices, on, off, mode "
+    "brief|prose|smart, lang auto|pt|en, random on|off, repeat [all|smart|slow|<n>], "
+    "status; `help all` lists everything. Female Portuguese voice: kokoro pf_dora "
+    "or say Luciana. Never ask for an API key in chat."
+)
 
 
 def on_turn(assistant_response="", session_id="", platform="", **_):
@@ -29,21 +49,26 @@ def on_turn(assistant_response="", session_id="", platform="", **_):
         engine.log("hermes hook: %s" % e)
 
 
-def on_command(raw_args=""):
-    try:
-        argv = shlex.split(raw_args or "")
-    except ValueError as e:
-        return str(e)
-    if argv[:1] == ["key"]:
-        return ("Set GEMINI_API_KEY in ~/.hermes/.env (or the plugin's settings in "
-                "Hermes Desktop), or run robot-voice key in a terminal.")
-    try:
-        return ctl.run(argv, detach=True)
-    except ctl.CtlError as e:
-        return str(e)
+def command(name):
+    """The handler for /robot:<name>."""
+    def handler(raw_args=""):
+        try:
+            return ctl.shortcut(name, raw_args, PREFIX)
+        except (ctl.CtlError, ValueError):
+            # A Hermes command can only return text, not hand words to the agent.
+            return ("Not a command as typed. Ask in the chat instead, e.g. "
+                    "\"use a female Portuguese voice\": the agent knows robot-voice. "
+                    "%shelp lists the commands." % PREFIX)
+    return handler
+
+
+def prompt_section(_session=None):
+    return PROMPT % os.path.join(engine.ROOT, "bin", "robot-voice")
 
 
 def register(ctx):
     ctx.register_hook("post_llm_call", on_turn)
-    ctx.register_command("robot", handler=on_command, description=DESCRIPTION,
-                         args_hint=ARGS_HINT)
+    for name, desc in DESCRIPTIONS.items():
+        ctx.register_command(PREFIX.lstrip("/") + name, handler=command(name),
+                             description=desc, args_hint=ARGS_HINTS.get(name, ""))
+    ctx.register_system_prompt_section("robot-voice", prompt_section, max_chars=900)

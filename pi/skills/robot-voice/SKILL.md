@@ -16,9 +16,10 @@ Run the CLI (the robot-voice extension puts it on your PATH):
 robot-voice <command>
 ```
 
-Report its output verbatim. `help` lists every command, `repeat help` the
-replay ones. The user can also type `/robot <command>` themselves: exact
-commands run instantly without you, and anything else reaches you here.
+Report its output verbatim. `help all` lists every command. The user also
+has `/robot:use`, `/robot:voice`, `/robot:all`, `/robot:tldr`, `/robot:brief`
+and `/robot:help`: exact commands run instantly without you, and
+`/robot:use` in plain words reaches you here.
 
 ## Mapping what the user says
 

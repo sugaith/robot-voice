@@ -83,54 +83,52 @@ class ClaudeCode(Base):
         self.assertEqual(spoken(), [])
         self.assertEqual(ctl.run(["repeat", "show"], session="s3"), "Muted reply.")
 
-    def test_known_subcommand_is_answered_without_the_model(self):
-        out = claude_code.command({"command_name": "robot-voice:robot",
-                                   "command_args": "mode prose", "session_id": "s4"})
+    def cmd(self, name, args=""):
+        return claude_code.command({"command_name": "robot-voice:" + name,
+                                    "command_args": args, "session_id": "s4"})
+
+    def test_use_sets_engine_and_voice_without_the_model(self):
+        out = self.cmd("use", "kokoro pf_dora")
         self.assertEqual(out["decision"], "block")
-        self.assertIn("mode     prose", out["reason"])
-        self.assertEqual(engine.load_config()["mode"], "prose")
-
-    def test_loose_phrasing_goes_to_the_model(self):
-        self.assertIsNone(claude_code.command(
-            {"command_name": "robot", "command_args": "talk a bit slower please"}))
-
-    def test_other_commands_are_ignored(self):
-        self.assertIsNone(claude_code.command({"command_name": "robotic",
-                                               "command_args": "status"}))
-
-    def test_known_word_that_is_not_a_command_goes_to_the_model(self):
-        for args in ("mode loud", "repeat that but slower"):
-            self.assertIsNone(claude_code.command({"command_name": "robot",
-                                                   "command_args": args}), args)
-
-    def test_key_is_never_taken_through_the_prompt(self):
-        out = claude_code.command({"command_name": "robot", "command_args": "key"})
-        self.assertIn("in a terminal", out["reason"])
-
-    def test_shortcut_skills_run_their_command(self):
-        out = claude_code.command({"command_name": "robot-voice:use",
-                                   "command_args": "kokoro", "session_id": "s6"})
         self.assertIn("engine   kokoro", out["reason"])
-        out = claude_code.command({"command_name": "robot-voice:lang",
-                                   "command_args": "pt", "session_id": "s6"})
-        self.assertIn("lang     pt", out["reason"])
-        out = claude_code.command({"command_name": "robot-voice:voice",
-                                   "command_args": "", "session_id": "s6"})
-        self.assertIn("pt       pf_dora", out["reason"])
+        self.assertIn("pt pf_dora", out["reason"])
 
-    def test_someone_elses_status_is_left_alone(self):
-        self.assertIsNone(claude_code.command({"command_name": "status",
-                                               "command_args": ""}))
+    def test_use_with_a_voice_alone_picks_its_engine(self):
+        self.assertIn("engine   sano", self.cmd("use", "heart")["reason"])
 
-    def test_shortcuts_skills_and_matcher_agree(self):
-        skills = set(os.listdir(os.path.join(ROOT, "skills"))) - {"robot"}
-        self.assertEqual(skills, set(claude_code.SHORTCUTS))
+    def test_use_in_plain_words_goes_to_the_model(self):
+        self.assertIsNone(self.cmd("use", "uma voz feminina em portugues"))
+
+    def test_replays(self):
+        engine.handle_reply("First sentence here. Then a lot more text follows. Ok?", "s4")
+        open(SPOKEN, "w").close()
+        self.assertIn("Then a lot more", self.cmd("all")["reason"])
+        self.assertEqual(self.cmd("brief")["reason"], "First sentence here. Ok?")
+        self.assertTrue(self.cmd("tldr")["reason"])  # Gemini, or the brief line without a key
+        self.assertEqual(len(wait_for_speech(3)), 3)
+
+    def test_voice_and_help(self):
+        self.assertIn("en       Samantha", self.cmd("voice")["reason"])
+        self.assertIn("/robot-voice:use <engine> [voice]", self.cmd("help")["reason"])
+
+    def test_the_umbrella_and_other_commands_are_gone(self):
+        for name in ("robot-voice:robot", "robot", "robot-voice:status", "status"):
+            self.assertIsNone(claude_code.command({"command_name": name,
+                                                   "command_args": "status"}), name)
+
+    def test_skills_matcher_and_commands_agree(self):
+        from robot_voice import ctl as control
+        import re
+        self.assertEqual(set(os.listdir(os.path.join(ROOT, "skills"))), set(control.SHORTCUTS))
         with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
             matcher = json.load(f)["hooks"]["UserPromptExpansion"][0]["matcher"]
-        import re
-        for name in claude_code.SHORTCUTS + ("robot",):
+        for name in control.SHORTCUTS:
             self.assertTrue(re.search(matcher, "robot-voice:" + name), name)
-        self.assertFalse(re.search(matcher, "status"))
+        self.assertFalse(re.search(matcher, "robot-voice:robot"))
+        with open(os.path.join(ROOT, "pi", "extension.ts")) as f:
+            pi_src = f.read()
+        for name in control.SHORTCUTS:
+            self.assertIn("\n\t%s: " % name, pi_src, name)
 
     def test_hook_script_end_to_end(self):
         payload = json.dumps({"session_id": "s5", "last_assistant_message": "Done. Tests pass."})
@@ -157,18 +155,35 @@ class Hermes(Base):
         time.sleep(0.5)
         self.assertEqual(spoken(), [])
 
-    def test_command_returns_text_directly(self):
-        self.assertIn("engine   say", hermes.on_command(""))
-        self.assertIn("mode must be one of", hermes.on_command("mode loud"))
+    def test_commands_return_text_directly(self):
+        self.assertIn("engine   say", hermes.command("use")(""))
+        self.assertIn("engine   kokoro", hermes.command("use")("kokoro"))
+        self.assertIn("/robot:use", hermes.command("help")(""))
 
-    def test_command_refuses_to_take_a_key(self):
-        self.assertIn("GEMINI_API_KEY", hermes.on_command("key abc123"))
+    def test_plain_words_point_to_the_chat(self):
+        self.assertIn("Ask in the chat", hermes.command("use")("a female voice"))
+
+    def test_registers_every_command_and_a_prompt_section(self):
+        registered = {}
+
+        class Ctx:
+            def register_hook(self, *a): pass
+            def register_command(self, name, handler, description, args_hint):
+                registered[name] = handler
+            def register_system_prompt_section(self, id, content, max_chars):
+                registered["prompt"] = content()
+
+        hermes.register(Ctx())
+        self.assertEqual(set(registered) - {"prompt"},
+                         {"robot:" + n for n in ctl.SHORTCUTS})
+        self.assertIn("bin/robot-voice", registered["prompt"])
+        self.assertLessEqual(len(registered["prompt"]), 900)
 
     def test_repeat_uses_the_session_that_spoke_last(self):
         hermes.on_turn(assistant_response="First. Then more.", session_id="h3",
                        platform="tui")
         wait_for_speech(1)
-        self.assertEqual(hermes.on_command("repeat show all"), "First. Then more.")
+        self.assertEqual(hermes.command("all")(""), "First. Then more.")
 
 
 class Cli(Base):
@@ -276,6 +291,7 @@ class Engines(Base):
 
     def test_engine_names_switch_directly(self):
         self.assertIn("engine   sano → kokoro → say", ctl.run(["sano"]))
+        self.assertIn("pt pm_alex", ctl.run(["kokoro", "pm_alex"]))
 
 
 class Voices(Base):

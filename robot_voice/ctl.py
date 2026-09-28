@@ -5,6 +5,8 @@ each surface decides how to display it: the terminal prints, Claude Code's
 command hook shows it in place of a model turn, Hermes returns it from its
 slash command.
 """
+import shlex
+
 from . import engine, keys, voices
 
 MODES = ("prose", "brief", "smart", "off")
@@ -17,13 +19,13 @@ REPLAY_MODES = ("brief", "prose", "smart")
 ON = ("on", "yes", "true", "1")
 OFF = ("off", "no", "false", "0")
 
-USAGE = """usage: /robot <command>        (terminal: robot-voice <command>)
+USAGE = """usage: robot-voice <command>
 
   status                   settings, and what actually spoke last
   on | off                 enable / disable spoken replies
   mode prose|brief|smart   how much gets spoken
   use gemini|sano|kokoro|say
-                           switch engine (or just name it: /robot sano)
+                           switch engine (or just name it: robot-voice sano)
   lang auto|pt|en          auto picks per reply; pt / en pin one language
   voice                    the current voices, and the one heard last
   voice <name>             set a voice (pt or en slot, from the name)
@@ -42,7 +44,7 @@ USAGE = """usage: /robot <command>        (terminal: robot-voice <command>)
 
 Engines fall back in order (see status); macOS say is always the last resort."""
 
-REPEAT_USAGE = """usage: /robot repeat [command]
+REPEAT_USAGE = """usage: robot-voice repeat [command]
 
   (none)        say the last spoken line again, verbatim
   all           the full last reply, uncapped
@@ -74,6 +76,47 @@ def understands(argv):
     return not argv or argv[0].lower() in COMMANDS
 
 
+HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
+
+  {p}use <engine> [voice]   gemini | sano | kokoro | say, e.g. {p}use kokoro pf_dora
+  {p}use <voice>            a voice name alone also picks its engine
+  {p}use <anything else>    in plain words: "a female Portuguese voice"
+  {p}voice [name]           show the current voices, or set one
+  {p}all                    say the last reply again, all of it
+  {p}tldr                   ...as one short sentence (Gemini; else the first one)
+  {p}brief                  ...its first sentence and closing question
+  {p}help                   this
+
+Everything else (on/off, mode, lang, random, status...): robot-voice help all"""
+
+
+def help_text(prefix="/robot-voice:"):
+    return HELP.format(p=prefix)
+
+
+# The slash commands every agent exposes, each as <prefix><name>: Claude Code
+# /robot-voice:use, Hermes and pi /robot:use. Each maps onto the CLI's argv.
+SHORTCUTS = {
+    "use": ["use"],
+    "voice": ["voice"],
+    "all": ["repeat", "all"],
+    "tldr": ["repeat", "smart"],
+    "brief": ["repeat", "brief"],
+    "help": ["help"],
+}
+
+
+def shortcut(name, args, prefix, detach=True, session=None):
+    """Run /<prefix><name> <args>. Raises CtlError when the arguments aren't a
+    command as typed -- plain words the agent should take instead."""
+    argv = SHORTCUTS[name] + shlex.split(args or "")
+    if name == "help":
+        return USAGE if argv[1:2] == ["all"] else help_text(prefix)
+    if name == "use" and len(argv) == 1:
+        return status(engine.load_config())
+    return run(argv, detach=detach, session=session)
+
+
 def run(argv, detach=False, session=None):
     """Execute one command. With `detach`, speech plays in the background and
     this returns at once -- for hosts that must not block on audio."""
@@ -85,7 +128,7 @@ def run(argv, detach=False, session=None):
     if cmd in ("status", "show"):
         return status(cfg)
     if cmd == "help":
-        return USAGE
+        return USAGE if rest[:1] == ["all"] else help_text("robot-voice ")
     if cmd == "voices":
         return list_voices(cfg)
     if cmd == "voice" and not rest:
@@ -122,11 +165,12 @@ def run(argv, detach=False, session=None):
             raise CtlError("mode must be one of: " + ", ".join(MODES))
         cfg["mode"] = mode
         cfg["enabled"] = mode != "off"
-    elif cmd in BACKEND_CMDS or cmd in BACKEND_NAMES:
-        backend = cmd if cmd in BACKEND_NAMES else arg.lower()
-        if backend not in BACKENDS:
-            raise CtlError("engine must be one of: " + ", ".join(BACKENDS))
-        cfg["backend"] = backend
+    elif cmd in BACKEND_NAMES:
+        cfg["backend"] = cmd
+        if rest:
+            set_voice(cfg, rest)
+    elif cmd in BACKEND_CMDS:
+        use(cfg, rest)
     elif cmd == "lang":
         lang = arg.lower() or "auto"
         lang = {"portuguese": "pt", "pt-br": "pt", "english": "en"}.get(lang, lang)
@@ -153,6 +197,28 @@ def run(argv, detach=False, session=None):
 
     engine.save_config(cfg)
     return status(cfg)
+
+
+def use(cfg, rest):
+    """use <engine> [voice] | use <voice>: a known voice name alone switches to
+    the engine it belongs to. Anything else is not a command (CtlError), so an
+    agent can take it as plain words instead."""
+    if not rest:
+        raise CtlError("engine must be one of: " + ", ".join(BACKENDS))
+    head = rest[0].lower()
+    if head in BACKENDS:
+        cfg["backend"] = head
+        if rest[1:]:
+            set_voice(cfg, rest[1:])
+        return
+    name = " ".join(rest)
+    for backend in BACKENDS:
+        if voices.lang_of_voice(backend, name) and name in (
+                voices.catalog(backend, "en") + voices.catalog(backend, "pt")):
+            cfg["backend"] = backend
+            set_voice(cfg, rest)
+            return
+    raise CtlError("not an engine or a voice: %s" % name)
 
 
 def set_voice(cfg, rest):

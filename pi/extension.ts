@@ -3,8 +3,8 @@
  *
  * Pi runs this inside its own process, so nothing here waits on audio: the
  * reply goes to a detached `python3 -m robot_voice _job`, the same core the
- * Claude Code and Hermes adapters use, and /robot runs the CLI and shows its
- * output as a notification, without a model turn.
+ * Claude Code and Hermes adapters use, and /robot:<command> runs the CLI and
+ * shows its output as a notification, without a model turn.
  */
 import { execFile, spawn } from "node:child_process";
 import * as path from "node:path";
@@ -12,6 +12,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ROOT = path.resolve(__dirname, "..");
 const PYTHON = process.env.ROBOT_VOICE_HOOK_PYTHON || "python3";
+
+const COMMANDS: Record<string, string> = {
+	use: "Robot voice: switch engine or voice -- <engine> [voice], a voice, or plain words",
+	voice: "Robot voice: show the current voices, or set one",
+	all: "Robot voice: say the last reply again, all of it",
+	tldr: "Robot voice: the last reply as one short sentence",
+	brief: "Robot voice: the last reply's first sentence again",
+	help: "Robot voice: the commands",
+};
 
 function env(): NodeJS.ProcessEnv {
 	const prior = process.env.PYTHONPATH;
@@ -74,30 +83,34 @@ export default function (pi: ExtensionAPI) {
 		speak(text, `pi-${ctx.sessionManager.getSessionId()}`);
 	});
 
-	pi.registerCommand("robot", {
-		description: "Robot voice: speak replies out loud -- /robot help",
-		handler: async (args, ctx) => {
-			const request = args.trim();
-			const argv = ["-m", "robot_voice", "--detach",
-				"--session", `pi-${ctx.sessionManager.getSessionId()}`,
-				...(request ? request.split(/\s+/) : [])];
-			const failed = await new Promise<boolean>((resolve) => {
-				execFile(PYTHON, argv, { cwd: ROOT, env: env(), timeout: 15000 },
-					(err, stdout, stderr) => {
-						if (err && request) return resolve(true);
-						const out = (stdout || "").trim() || (stderr || "").trim()
-							|| (err ? String(err.message) : "done");
-						ctx.ui.notify(out, err ? "error" : "info");
-						resolve(false);
-					});
-			});
-			if (!failed) return;
-			// Not an exact command ("talk slower", "a female voice"): hand it to
-			// the agent through the skill, like Claude Code's /robot does.
-			pi.sendUserMessage(`/skill:robot-voice ${request}`, {
-				expandPromptTemplates: true,
-				...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
-			});
-		},
-	});
+	// /robot:use, :voice, :all, :tldr, :brief, :help -- the same commands as
+	// Claude Code's /robot-voice:<name>. Each runs locally, without the model.
+	for (const [name, description] of Object.entries(COMMANDS)) {
+		pi.registerCommand(`robot:${name}`, {
+			description,
+			handler: async (args, ctx) => {
+				const request = args.trim();
+				const argv = ["-m", "robot_voice", "--detach", "--shortcut", name,
+					"--prefix", "/robot:", "--session", `pi-${ctx.sessionManager.getSessionId()}`,
+					...(request ? request.split(/\s+/) : [])];
+				const failed = await new Promise<boolean>((resolve) => {
+					execFile(PYTHON, argv, { cwd: ROOT, env: env(), timeout: 15000 },
+						(err, stdout, stderr) => {
+							if (err && name === "use" && request) return resolve(true);
+							const out = (stdout || "").trim() || (stderr || "").trim()
+								|| (err ? String(err.message) : "done");
+							ctx.ui.notify(out, err ? "error" : "info");
+							resolve(false);
+						});
+				});
+				if (!failed) return;
+				// /robot:use in plain words ("a female Portuguese voice"): hand it
+				// to the agent through the skill, like Claude Code does.
+				pi.sendUserMessage(`/skill:robot-voice ${request}`, {
+					expandPromptTemplates: true,
+					...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
+				});
+			},
+		});
+	}
 }
