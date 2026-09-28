@@ -6,7 +6,10 @@
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/claude.py", "stop"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/claude.py",
+              "stop"
+            ],
             "async": true,
             "timeout": 90,
             "statusMessage": "Speaking..."
@@ -16,12 +19,15 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^(robot-voice:)?robot$",
+        "matcher": "^(robot|robot-voice:(robot|status|on|off|stop|use|voice|voices|lang|mode|random|repeat|say|test))$",
         "hooks": [
           {
             "type": "command",
             "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/claude.py", "command"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/claude.py",
+              "command"
+            ],
             "timeout": 10
           }
         ]

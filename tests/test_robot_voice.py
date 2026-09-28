@@ -107,6 +107,31 @@ class ClaudeCode(Base):
         out = claude_code.command({"command_name": "robot", "command_args": "key"})
         self.assertIn("in a terminal", out["reason"])
 
+    def test_shortcut_skills_run_their_command(self):
+        out = claude_code.command({"command_name": "robot-voice:use",
+                                   "command_args": "kokoro", "session_id": "s6"})
+        self.assertIn("engine   kokoro", out["reason"])
+        out = claude_code.command({"command_name": "robot-voice:lang",
+                                   "command_args": "pt", "session_id": "s6"})
+        self.assertIn("lang     pt", out["reason"])
+        out = claude_code.command({"command_name": "robot-voice:voice",
+                                   "command_args": "", "session_id": "s6"})
+        self.assertIn("pt       pf_dora", out["reason"])
+
+    def test_someone_elses_status_is_left_alone(self):
+        self.assertIsNone(claude_code.command({"command_name": "status",
+                                               "command_args": ""}))
+
+    def test_shortcuts_skills_and_matcher_agree(self):
+        skills = set(os.listdir(os.path.join(ROOT, "skills"))) - {"robot"}
+        self.assertEqual(skills, set(claude_code.SHORTCUTS))
+        with open(os.path.join(ROOT, "hooks", "hooks.json")) as f:
+            matcher = json.load(f)["hooks"]["UserPromptExpansion"][0]["matcher"]
+        import re
+        for name in claude_code.SHORTCUTS + ("robot",):
+            self.assertTrue(re.search(matcher, "robot-voice:" + name), name)
+        self.assertFalse(re.search(matcher, "status"))
+
     def test_hook_script_end_to_end(self):
         payload = json.dumps({"session_id": "s5", "last_assistant_message": "Done. Tests pass."})
         res = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "claude.py"), "stop"],

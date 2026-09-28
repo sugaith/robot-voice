@@ -149,8 +149,10 @@ your voice carries over. Remove the old wiring or every reply is spoken twice:
 /robot say hello there          # arbitrary words
 ```
 
-In Claude Code the command is `/robot-voice:robot`, or plain `/robot` when no
-other plugin claims the name. An exact command like `/robot off` never reaches
+In Claude Code every command has the plugin's prefix: `/robot-voice:robot use
+sano`, or the shortcut skills `/robot-voice:use sano`, `/robot-voice:voice`,
+`/robot-voice:repeat 2`, and likewise `:status`, `:on`, `:off`, `:stop`,
+`:voices`, `:lang`, `:mode`, `:random`, `:say` and `:test`. An exact command like `/robot off` never reaches
 the model: a `UserPromptExpansion` hook runs it and shows the result in place
 of a turn, with no tokens and no interpretation. Claude Code labels those
 answers "blocked by hook". That's the mechanism, not an error. Anything else,
@@ -207,7 +209,7 @@ robot_voice/
   hermes.py       Hermes hook and slash command
 hooks/hooks.json  Claude Code hook wiring  → hooks/claude.py
 .claude-plugin/   Claude Code plugin + marketplace manifests
-skills/robot/     the skill Claude uses for loosely phrased requests
+skills/           robot (loose phrasing, for Claude) + one shortcut per command
 plugin.yaml       Hermes manifest          → __init__.py
 bin/robot-voice   the CLI (on Claude's Bash PATH while the plugin is enabled)
 ```

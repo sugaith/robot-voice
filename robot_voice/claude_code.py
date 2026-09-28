@@ -3,7 +3,8 @@
 stop     -- Stop hook. Claude Code hands over the finished reply as
             `last_assistant_message`, so there is no transcript to parse and
             no race with the writer.
-command  -- UserPromptExpansion hook on /robot. A valid command runs right
+command  -- UserPromptExpansion hook on /robot-voice:robot and its shortcuts
+            (/robot-voice:use, :voice, :repeat...). A valid command runs right
             here and its output replaces the model turn: no tokens, no
             interpretation. Anything else ("talk slower please", "mode loud")
             expands into the skill as usual and the model maps it.
@@ -16,7 +17,26 @@ import sys
 
 from . import ctl, engine
 
-SKILL_NAMES = ("robot", "robot-voice:robot")
+PLUGIN = "robot-voice"
+# /robot-voice:<name> shortcuts, one skill each: /robot-voice:use sano is
+# /robot-voice:robot use sano. Keep in step with skills/ and hooks/hooks.json.
+SHORTCUTS = ("status", "on", "off", "stop", "use", "voice", "voices", "lang",
+             "mode", "random", "repeat", "say", "test")
+
+
+def to_argv(command_name, command_args):
+    """The robot-voice argv a slash command stands for, or None if it isn't ours."""
+    name = command_name or ""
+    if name.startswith(PLUGIN + ":"):
+        name = name[len(PLUGIN) + 1:]
+    elif name != "robot":
+        return None  # a bare /status or /voice belongs to someone else
+    args = shlex.split(command_args or "")
+    if name == "robot":
+        return args
+    if name in SHORTCUTS:
+        return [name] + args
+    return None
 
 
 def stop(payload):
@@ -28,13 +48,11 @@ def stop(payload):
 
 def command(payload):
     """JSON to print, or None to let the command expand normally."""
-    if payload.get("command_name") not in SKILL_NAMES:
-        return None
     try:
-        argv = shlex.split(payload.get("command_args") or "")
+        argv = to_argv(payload.get("command_name"), payload.get("command_args"))
     except ValueError:
         return None  # unbalanced quotes: let the model make sense of it
-    if not ctl.understands(argv):
+    if argv is None or not ctl.understands(argv):
         return None
     try:
         out = ctl.run(argv, detach=True, session=payload.get("session_id"))
