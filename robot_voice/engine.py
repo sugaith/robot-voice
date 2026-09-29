@@ -56,9 +56,8 @@ DEFAULTS = {
     "local_python": "",         # python with sanotts/kokoro; found automatically
     "gemini_model": "gemini-2.5-flash-preview-tts",
     "summarizer_model": "gemini-2.5-flash-lite",
-    "max_chars_prose": 600,
+    "max_chars_prose": 1200,
     "max_chars_brief": 220,
-    "max_chars_summary": 360,
     "style": "",               # e.g. "Say it calm and low-key: " (gemini only)
     # Hermes surfaces that run on this machine. A Telegram turn handled by a
     # gateway on this host should not come out of its speakers.
@@ -389,7 +388,7 @@ def _google_message(err):
 
 SUMMARY_INSTRUCTION = (
     "You turn an AI coding assistant's reply into a short spoken summary for "
-    "the person who asked. Write 2 or 3 short sentences, at most 45 words, in "
+    "the person who asked. Write 3 to 5 short sentences, 60 to 90 words, in "
     "the same language as the reply: what was done or found, and the result. "
     "End with a question only if the reply itself asks the user one, and then "
     "keep its meaning. Plain speech only: no markdown, "
@@ -404,7 +403,7 @@ def to_summary(text, cfg):
     body = {
         "systemInstruction": {"parts": [{"text": SUMMARY_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": "<reply>\n%s\n</reply>" % text[:6000]}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 300,
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600,
                              "thinkingConfig": {"thinkingBudget": 0}},
     }
     try:
@@ -412,15 +411,18 @@ def to_summary(text, cfg):
         parts = res["candidates"][0]["content"]["parts"]
         summary = " ".join("".join(p.get("text", "") for p in parts).split())
         if summary:
-            return truncate(summary, cfg["max_chars_summary"])
+            return summary  # its length is the prompt's job: never cut mid-sentence
     except Exception as e:
         log("summary failed (%s); used the local one" % _redact(e))
-    return local_summary(text, cfg["max_chars_summary"])
+    return local_summary(text)
 
 
-def local_summary(text, cap):
-    """The first sentence of each paragraph, up to three, plus a closing
-    question. More than `brief`, which stops after the first sentence."""
+LOCAL_SUMMARY_PARAGRAPHS = 6
+
+
+def local_summary(text):
+    """The first substantial sentence of each paragraph, up to six, plus a
+    closing question. More than `brief`, which stops after the first one."""
     firsts = []
     for para in text.splitlines():
         sentences = [x.strip() for x in SENT_SPLIT_RE.split(para) if x.strip()]
@@ -428,11 +430,11 @@ def local_summary(text, cap):
         first = next((x for x in sentences if len(x) > 15), None)
         if first and first not in firsts:
             firsts.append(first)
-    picked = firsts[:3]
+    picked = firsts[:LOCAL_SUMMARY_PARAGRAPHS]
     last = [x.strip() for x in SENT_SPLIT_RE.split(text) if x.strip()]
     if last and last[-1].endswith("?") and last[-1] not in picked:
         picked.append(last[-1])
-    return truncate(" ".join(picked), cap)
+    return " ".join(picked)
 
 
 def shape(text, cfg, mode=None):

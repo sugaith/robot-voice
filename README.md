@@ -149,7 +149,7 @@ before the colon, Hermes and pi use `robot`:
 | `/robot-voice:use <plain words>` | `/robot:use <plain words>` | "a female Portuguese voice": the agent maps it |
 | `/robot-voice:voice [name]` | `/robot:voice [name]` | show the current voices, or set one |
 | `/robot-voice:all` | `/robot:all` | say the last reply again, all of it |
-| `/robot-voice:tldr` | `/robot:tldr` | ...as a real TL;DR: 2 or 3 sentences on what was done and the result (Gemini; without a key, a local summary) |
+| `/robot-voice:tldr` | `/robot:tldr` | ...as a real TL;DR: 3 to 5 sentences on what was done and the result, never cut off (Gemini; without a key, a local summary) |
 | `/robot-voice:brief` | `/robot:brief` | ...its first sentence and closing question |
 | `/robot-voice:vol 7` | `/robot:vol 7` | how loud, 0 to 10: 5 is normal, 10 twice as loud, 0 silent |
 | `/robot-voice:help` | `/robot:help` | these, in a few lines |
@@ -206,8 +206,8 @@ Measured on a typical reply (137 chars, ~9s of audio) with
 | mode | what you hear |
 |---|---|
 | `brief` | first sentence plus any closing question, ~220 chars (default) |
-| `prose` | the whole reply, cleaned, ~600 chars |
-| `smart` | a short summary, as `:tldr` gives: 2 or 3 sentences from a cheap Gemini call, or a local summary without one |
+| `prose` | the whole reply, cleaned, ~1200 chars |
+| `smart` | a summary of each reply, as `:tldr` gives: 3 to 5 sentences from a cheap Gemini call, or a local summary without one |
 | `off` | nothing (replies are still remembered for `repeat`) |
 
 ## Sessions, agents, and global

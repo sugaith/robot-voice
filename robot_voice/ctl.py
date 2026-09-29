@@ -52,7 +52,7 @@ REPEAT_USAGE = """usage: robot-voice repeat [command]
   all           the full last reply, uncapped
   brief         first sentence of the last reply
   prose         the last reply, cleaned and capped
-  smart         a short summary of the last reply (2-3 sentences)
+  smart         a short summary of the last reply (3-5 sentences)
   slow          the last spoken line, slower
   <n>           n replies back (1 = last, 2 = the one before, ...)
   back <n>      same as <n>

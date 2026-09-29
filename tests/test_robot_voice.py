@@ -601,6 +601,25 @@ class Summary(Base):
         self.assertTrue(body["contents"][0]["parts"][0]["text"].startswith("<reply>"))
         self.assertEqual(summary, "A WAV header and a C2PA block were the noise.")
 
+    def test_summaries_are_never_cut(self):
+        long_reply = "\n".join("Paragraph number %d explains one more part of the change in detail." % i
+                               for i in range(1, 9))
+        local = engine.to_summary(long_reply, engine.load_config())
+        self.assertEqual(local.count("Paragraph number"), engine.LOCAL_SUMMARY_PARAGRAPHS)
+        self.assertTrue(local.endswith("detail."))
+
+        saved = engine.gemini_call
+        words = " ".join(["word"] * 120) + "."
+        engine.gemini_call = lambda *a, **k: {"candidates": [{"content": {"parts": [{"text": words}]}}]}
+        try:
+            self.assertEqual(engine.to_summary(long_reply, engine.load_config()), words)
+        finally:
+            engine.gemini_call = saved
+
+    def test_prose_doubled_and_brief_unchanged(self):
+        self.assertEqual(engine.DEFAULTS["max_chars_prose"], 1200)
+        self.assertEqual(engine.DEFAULTS["max_chars_brief"], 220)
+
     def test_tldr_command_speaks_the_summary(self):
         engine.handle_reply(self.REPLY, "claude:T")
         out = claude_code.command({"command_name": "robot-voice:tldr", "command_args": "",

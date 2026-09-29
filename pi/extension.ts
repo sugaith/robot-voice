@@ -17,7 +17,7 @@ const COMMANDS: Record<string, string> = {
 	use: "Robot voice: switch engine or voice -- <engine> [voice], a voice, or plain words",
 	voice: "Robot voice: show the current voices, or set one",
 	all: "Robot voice: say the last reply again, all of it",
-	tldr: "Robot voice: a short summary of the last reply (2-3 sentences)",
+	tldr: "Robot voice: a short summary of the last reply (3-5 sentences)",
 	brief: "Robot voice: the last reply's first sentence again",
 	vol: "Robot voice: how loud, 0 to 10 (5 is normal, 10 twice as loud)",
 	help: "Robot voice: the commands",
