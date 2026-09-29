@@ -537,5 +537,33 @@ class GeminiKeys(Base):
             urllib.request.urlopen = saved
             del os.environ["GOOGLE_API_KEY"]
 
+
+class GeminiAudio(unittest.TestCase):
+    def wav(self, pcm, rate=24000, trailer=b""):
+        import struct
+        fmt = struct.pack("<HHIIHH", 1, 1, rate, rate * 2, 2, 16)
+        chunks = (b"fmt " + struct.pack("<I", len(fmt)) + fmt
+                  + b"data" + struct.pack("<I", len(pcm)) + pcm + trailer)
+        return b"RIFF" + struct.pack("<I", 4 + len(chunks)) + b"WAVE" + chunks
+
+    def test_raw_pcm_passes_through(self):
+        self.assertEqual(engine.gemini_pcm(b"\x01\x02", "audio/L16;codec=pcm;rate=24000"),
+                         (b"\x01\x02", 24000))
+
+    def test_wav_keeps_only_the_audio(self):
+        import struct
+        pcm = b"\x10\x00" * 50
+        c2pa = b"C2PA" + struct.pack("<I", 6) + b"manif!"   # provenance, not sound
+        self.assertEqual(engine.gemini_pcm(self.wav(pcm, 22050, c2pa), "audio/wav"),
+                         (pcm, 22050))
+
+    def test_unexpected_wav_formats_are_refused(self):
+        import struct
+        fmt = struct.pack("<HHIIHH", 3, 2, 24000, 0, 0, 32)   # float stereo
+        data = (b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt)) + b"WAVE"
+                + b"fmt " + struct.pack("<I", len(fmt)) + fmt)
+        with self.assertRaises(RuntimeError):
+            engine.gemini_pcm(data, "audio/wav")
+
 if __name__ == "__main__":
     unittest.main()
