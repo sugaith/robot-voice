@@ -489,5 +489,53 @@ class Volume(Base):
         hiss = array.array("h", [10, -20]).tobytes()  # near-silence isn't blown up
         self.assertEqual(max(abs(x) for x in array.array("h", engine.normalize(hiss))), 160)
 
+
+class GeminiKeys(Base):
+    def test_a_rejected_key_falls_through_to_the_next_source(self):
+        import io
+        import urllib.error
+        import urllib.request
+        used = []
+
+        def fake(req, timeout=0):
+            key = req.full_url.split("key=")[1]
+            used.append(key)
+            if key == "stale":
+                body = io.BytesIO(json.dumps({"error": {"message":
+                                  "API key not valid. Please pass a valid API key."}}).encode())
+                raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, body)
+            return io.BytesIO(json.dumps({"ok": True}).encode())
+
+        saved = urllib.request.urlopen
+        urllib.request.urlopen = fake
+        os.environ["GEMINI_API_KEY"], os.environ["GOOGLE_API_KEY"] = "stale", "good"
+        try:
+            self.assertEqual(engine.gemini_call("m", {}, engine.load_config()), {"ok": True})
+        finally:
+            urllib.request.urlopen = saved
+            del os.environ["GEMINI_API_KEY"], os.environ["GOOGLE_API_KEY"]
+        self.assertEqual(used, ["stale", "good"])
+        with open(engine.LOG_PATH) as f:
+            self.assertIn("the key from GEMINI_API_KEY was rejected (API key not valid", f.read())
+
+    def test_other_errors_carry_googles_message(self):
+        import io
+        import urllib.error
+        import urllib.request
+
+        def fake(req, timeout=0):
+            body = io.BytesIO(json.dumps({"error": {"message": "voice Zed not found"}}).encode())
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {}, body)
+
+        saved = urllib.request.urlopen
+        urllib.request.urlopen = fake
+        os.environ["GOOGLE_API_KEY"] = "good"
+        try:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 400: voice Zed not found"):
+                engine.gemini_call("m", {}, engine.load_config())
+        finally:
+            urllib.request.urlopen = saved
+            del os.environ["GOOGLE_API_KEY"]
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import wave
 
@@ -352,9 +353,37 @@ def truncate(text, cap):
     return cut[: dot + 1] if dot > cap * 0.5 else cut.rstrip() + "."
 
 
-def _gemini_url(model, cfg):
-    return ("https://generativelanguage.googleapis.com/v1beta/models/"
-            "%s:generateContent?key=%s" % (model, keys.gemini_key(cfg)))
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
+
+
+def gemini_call(model, body, cfg, timeout=60):
+    """POST to Gemini, trying each available key in turn when Google rejects
+    one as invalid -- a stale key exported in some shell shouldn't silence a
+    good one in the keychain. Errors carry Google's own message."""
+    rejected = []
+    for key, source in keys.candidates(cfg):
+        req = urllib.request.Request(GEMINI_URL % (model, key), data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            return json.load(urllib.request.urlopen(req, timeout=timeout))
+        except urllib.error.HTTPError as e:
+            message = _google_message(e)
+            if e.code in (400, 401, 403) and "api key" in message.lower():
+                rejected.append(source)
+                log("gemini: the key from %s was rejected (%s); trying the next one"
+                    % (source, message))
+                continue
+            raise RuntimeError("HTTP %d: %s" % (e.code, message))
+    if rejected:
+        raise RuntimeError("every Gemini key was rejected (%s)" % ", ".join(rejected))
+    raise RuntimeError("no Gemini API key -- run `robot-voice key`, or set GEMINI_API_KEY")
+
+
+def _google_message(err):
+    try:
+        return _redact(json.load(err).get("error", {}).get("message", "")) or err.reason
+    except (ValueError, AttributeError):
+        return str(err.reason)
 
 
 def to_smart(text, cfg):
@@ -369,10 +398,7 @@ def to_smart(text, cfg):
             "generationConfig": {"temperature": 0.2, "maxOutputTokens": 200,
                                  "thinkingConfig": {"thinkingBudget": 0}}}
     try:
-        req = urllib.request.Request(_gemini_url(cfg["summarizer_model"], cfg),
-                                     data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
-        res = json.load(urllib.request.urlopen(req, timeout=25))
+        res = gemini_call(cfg["summarizer_model"], body, cfg, timeout=25)
         parts = res["candidates"][0]["content"]["parts"]
         line = "".join(p.get("text", "") for p in parts).strip()
         return line or to_brief(text, cfg["max_chars_brief"])
@@ -578,10 +604,7 @@ def speak_gemini(text, cfg, voice, out):
                 "prebuiltVoiceConfig": {"voiceName": voice}}},
         },
     }
-    req = urllib.request.Request(_gemini_url(cfg["gemini_model"], cfg),
-                                 data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
-    res = json.load(urllib.request.urlopen(req, timeout=60))
+    res = gemini_call(cfg["gemini_model"], body, cfg)
     inline = res["candidates"][0]["content"]["parts"][0]["inlineData"]
     rate = 24000
     m = re.search(r"rate=(\d+)", inline.get("mimeType", ""))

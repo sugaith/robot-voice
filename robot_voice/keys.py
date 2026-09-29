@@ -74,17 +74,18 @@ def _sources(cfg):
     yield "config.json", lambda: cfg.get("gemini_api_key")
 
 
-def find(cfg):
-    """(key, where_it_came_from), or (None, None)."""
+def candidates(cfg):
+    """Every distinct key available, in order, as (key, where_it_came_from).
+    More than one source can hold a key, and an old one exported in some
+    shell shouldn't hide a good one further down."""
+    seen = set()
     for name, read in _sources(cfg):
         value = (read() or "").strip()
-        if value:
-            return value, name
-    return None, None
+        if value and value not in seen:
+            seen.add(value)
+            yield value, name
 
 
-def gemini_key(cfg):
-    key, _ = find(cfg)
-    if not key:
-        raise RuntimeError("no Gemini API key -- run `robot-voice key`, or set GEMINI_API_KEY")
-    return key
+def find(cfg):
+    """(key, where_it_came_from), or (None, None)."""
+    return next(candidates(cfg), (None, None))
