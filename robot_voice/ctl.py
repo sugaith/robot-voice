@@ -52,7 +52,7 @@ REPEAT_USAGE = """usage: robot-voice repeat [command]
   all           the full last reply, uncapped
   brief         first sentence of the last reply
   prose         the last reply, cleaned and capped
-  smart         one-sentence summary of the last reply
+  smart         a short summary of the last reply (2-3 sentences)
   slow          the last spoken line, slower
   <n>           n replies back (1 = last, 2 = the one before, ...)
   back <n>      same as <n>
@@ -91,7 +91,7 @@ HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
   {p}use <anything else>    in plain words: "a female Portuguese voice"
   {p}voice [name]           show the current voices, or set one
   {p}all                    say the last reply again, all of it
-  {p}tldr                   ...as one short sentence (Gemini; else the first one)
+  {p}tldr                   ...as a short summary: what was done, and the result
   {p}brief                  ...its first sentence and closing question
   {p}vol [0-10]             how loud: 5 is normal, 10 twice as loud, 0 silent
   {p}help                   this

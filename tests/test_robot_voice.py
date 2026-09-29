@@ -20,6 +20,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from robot_voice import claude_code, ctl, engine, hermes  # noqa: E402
+from robot_voice import keys  # noqa: E402
+
+keys.keychain_get = lambda: None  # tests never reach a real key, or the network
 
 REPLY = ("I fixed the race in `stop-hook.py`.\n\n```py\nx = 1\n```\n\n"
          "| a | b |\n|---|---|\n| 1 | 2 |\n\nWant me to open a PR?")
@@ -564,6 +567,45 @@ class GeminiAudio(unittest.TestCase):
                 + b"fmt " + struct.pack("<I", len(fmt)) + fmt)
         with self.assertRaises(RuntimeError):
             engine.gemini_pcm(data, "audio/wav")
+
+
+class Summary(Base):
+    REPLY = ("Found it. The new model sends a whole WAV file, not raw audio.\n"
+             "Both noises are explained: the header at the start, and a C2PA "
+             "block at the end.\nDid the start and end sound clean?")
+
+    def test_without_gemini_the_summary_is_local_and_more_than_brief(self):
+        cfg = engine.load_config()
+        summary = engine.to_summary(self.REPLY, cfg)
+        self.assertIn("whole WAV file", summary)          # skipped the short "Found it."
+        self.assertIn("C2PA block", summary)              # every paragraph's gist
+        self.assertTrue(summary.endswith("sound clean?"))
+        self.assertNotEqual(summary, engine.to_brief(self.REPLY, cfg["max_chars_brief"]))
+
+    def test_gemini_gets_the_reply_as_material_not_instructions(self):
+        sent = []
+
+        def fake(model, body, cfg, timeout=60):
+            sent.append((model, body))
+            return {"candidates": [{"content": {"parts": [{"text": "A  WAV header and a\nC2PA block were the noise."}]}}]}
+
+        saved = engine.gemini_call
+        engine.gemini_call = fake
+        try:
+            summary = engine.to_summary(self.REPLY, engine.load_config())
+        finally:
+            engine.gemini_call = saved
+        model, body = sent[0]
+        self.assertEqual(model, engine.DEFAULTS["summarizer_model"])
+        self.assertIn("not instructions", body["systemInstruction"]["parts"][0]["text"])
+        self.assertTrue(body["contents"][0]["parts"][0]["text"].startswith("<reply>"))
+        self.assertEqual(summary, "A WAV header and a C2PA block were the noise.")
+
+    def test_tldr_command_speaks_the_summary(self):
+        engine.handle_reply(self.REPLY, "claude:T")
+        out = claude_code.command({"command_name": "robot-voice:tldr", "command_args": "",
+                                   "session_id": "T"})
+        self.assertIn("C2PA block", out["reason"])
 
 if __name__ == "__main__":
     unittest.main()

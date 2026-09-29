@@ -1,6 +1,6 @@
 ---
 name: tldr
-description: "Robot voice: say the last reply again as one short sentence."
+description: "Robot voice: a short summary of the last reply, 2 or 3 sentences on what was done and the result."
 disable-model-invocation: true
 allowed-tools: Bash(robot-voice:*)
 ---

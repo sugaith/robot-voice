@@ -16,7 +16,7 @@ DESCRIPTIONS = {
     "use": "Robot voice: switch engine or voice",
     "voice": "Robot voice: show or set the voice",
     "all": "Robot voice: say the last reply again, all of it",
-    "tldr": "Robot voice: the last reply as one short sentence",
+    "tldr": "Robot voice: a short summary of the last reply (2-3 sentences)",
     "brief": "Robot voice: the last reply's first sentence again",
     "vol": "Robot voice: how loud, 0 to 10 (5 is normal)",
     "help": "Robot voice: the commands",
