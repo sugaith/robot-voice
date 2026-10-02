@@ -51,6 +51,25 @@ def on_turn(assistant_response="", session_id="", platform="", **_):
         engine.log("hermes hook: %s" % e)
 
 
+def on_tool_call(tool_name="", args=None, platform="", **_):
+    """pre_tool_call: Hermes' clarify tool asks the user and waits, so speak
+    its questions (and choices) as they're asked. Never blocks the call."""
+    if tool_name != "clarify" or not isinstance(args, dict):
+        return None
+    if platform and platform not in engine.load_config().get("hermes_platforms", ()):
+        return None
+    batch = args.get("questions")
+    items = ([(q.get("question", ""), q.get("choices") or []) for q in batch if isinstance(q, dict)]
+             if isinstance(batch, list) and batch else
+             [(args.get("question", ""), args.get("choices") or [])])
+    try:
+        engine.spawn({"op": "ask", "items": items,
+                      "session": engine.session_id(agent="hermes")})
+    except Exception as e:
+        engine.log("hermes clarify hook: %s" % e)
+    return None
+
+
 def command(name):
     """The handler for /robot:<name>."""
     def handler(raw_args=""):
@@ -74,6 +93,7 @@ def prompt_section(info=None):
 
 def register(ctx):
     ctx.register_hook("post_llm_call", on_turn)
+    ctx.register_hook("pre_tool_call", on_tool_call)
     for name, desc in DESCRIPTIONS.items():
         ctx.register_command(PREFIX.lstrip("/") + name, handler=command(name),
                              description=desc, args_hint=ARGS_HINTS.get(name, ""))

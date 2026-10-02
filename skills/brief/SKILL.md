@@ -1,6 +1,6 @@
 ---
 name: brief
-description: "Robot voice: say the last reply's first sentence and closing question again."
+description: "Robot voice: say the last reply's first sentence again, then every question it asks."
 disable-model-invocation: true
 allowed-tools: Bash(robot-voice:*)
 ---

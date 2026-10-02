@@ -576,7 +576,7 @@ class Summary(Base):
 
     def test_without_gemini_the_summary_is_local_and_more_than_brief(self):
         cfg = engine.load_config()
-        summary = engine.to_summary(self.REPLY, cfg)
+        summary = engine.shape(self.REPLY, cfg, "smart")
         self.assertIn("whole WAV file", summary)          # skipped the short "Found it."
         self.assertIn("C2PA block", summary)              # every paragraph's gist
         self.assertTrue(summary.endswith("sound clean?"))
@@ -625,6 +625,94 @@ class Summary(Base):
         out = claude_code.command({"command_name": "robot-voice:tldr", "command_args": "",
                                    "session_id": "T"})
         self.assertIn("C2PA block", out["reason"])
+
+
+class Questions(Base):
+    REPLY = """Before I implement the export, I need to clarify a few things.
+
+The current report code lives in `src/reports/export.ts` and only supports CSV.
+
+Questions:
+1. **Format** - should it be PDF, XLSX, or both?
+2. Do the exports need to include archived clients?
+3. Who can trigger it: only admins, or any accountant
+
+Once you answer, I'll write the plan. Should I also add a scheduled export?"""
+    ASKED = ["Format - should it be PDF, XLSX, or both?",
+             "Do the exports need to include archived clients?",
+             "Who can trigger it: only admins, or any accountant?",
+             "Should I also add a scheduled export?"]
+
+    def test_every_question_is_found_in_order(self):
+        self.assertEqual(engine.questions(self.REPLY), self.ASKED)
+
+    def test_every_mode_asks_every_question(self):
+        cfg = engine.load_config()
+        for mode in ("brief", "prose", "smart"):
+            spoken = engine.shape(self.REPLY, cfg, mode)
+            for q in self.ASKED:
+                self.assertIn(engine._norm(q), engine._norm(spoken), (mode, q))
+
+    def test_brief_caps_the_statement_never_the_questions(self):
+        cfg = dict(engine.load_config(), max_chars_brief=20)
+        spoken = engine.shape(self.REPLY, cfg, "brief")
+        self.assertTrue(spoken.endswith("Should I also add a scheduled export?"))
+        self.assertIn("Who can trigger it: only admins, or any accountant?", spoken)
+
+    def test_the_summarizer_never_sees_the_questions(self):
+        seen = []
+
+        def fake(model, body, cfg, timeout=60):
+            seen.append(body["contents"][0]["parts"][0]["text"])
+            return {"candidates": [{"content": {"parts": [{"text": "Export needs decisions."}]}}]}
+
+        saved = engine.gemini_call
+        engine.gemini_call = fake
+        try:
+            spoken = engine.shape(self.REPLY, engine.load_config(), "smart")
+        finally:
+            engine.gemini_call = saved
+        self.assertNotIn("?", seen[0])
+        self.assertTrue(spoken.startswith("Export needs decisions. Format - should it be"))
+
+    def test_portuguese_question_list(self):
+        reply = "Antes de implementar, preciso saber:\n- Qual banco, Postgres ou SQLite?\n- Precisa de login\n\nO resto está pronto."
+        self.assertEqual(engine.shape(reply, engine.load_config(), "brief"),
+                         "Antes de implementar, preciso saber: Qual banco, Postgres ou SQLite? Precisa de login?")
+
+    def test_a_reply_without_questions_is_unchanged(self):
+        self.assertEqual(engine.shape("Fixed the race. All tests pass.", engine.load_config(), "brief"),
+                         "Fixed the race.")
+
+
+class AskTools(Base):
+    def test_claude_ask_user_question_is_spoken_with_options(self):
+        payload = {"session_id": "Q", "tool_name": "AskUserQuestion", "tool_input": {"questions": [
+            {"question": "Which database should I use?", "header": "DB",
+             "options": [{"label": "Postgres", "description": "x"}, {"label": "SQLite", "description": "y"}]},
+            {"question": "Include archived clients?", "options": []}]}}
+        res = subprocess.run([sys.executable, os.path.join(ROOT, "hooks", "claude.py"), "ask"],
+                             input=json.dumps(payload), capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(spoken(), [["say", "Samantha", "Which database should I use? "
+                                     "Options: Postgres or SQLite. Include archived clients?"]])
+
+    def test_hermes_clarify_is_spoken(self):
+        hermes.on_tool_call(tool_name="clarify",
+                            args={"question": "Qual banco usar", "choices": ["Postgres", "SQLite"]})
+        self.assertEqual(wait_for_speech(1),
+                         [["say", "Luciana", "Qual banco usar? Opções: Postgres ou SQLite."]])
+
+    def test_hermes_clarify_batch_and_other_tools(self):
+        hermes.on_tool_call(tool_name="terminal", args={"command": "ls"})
+        hermes.on_tool_call(tool_name="clarify", args={"questions": [
+            {"question": "First?"}, {"question": "Second?", "choices": ["a", "b"]}]})
+        self.assertEqual(wait_for_speech(1)[0][2], "First? Second? Options: a or b.")
+
+    def test_muted_asks_stay_silent(self):
+        ctl.run(["off"])
+        self.assertIsNone(engine.handle_ask([("Anything?", [])], "claude:Q"))
+        self.assertEqual(spoken(), [])
 
 if __name__ == "__main__":
     unittest.main()

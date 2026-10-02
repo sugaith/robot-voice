@@ -92,7 +92,7 @@ HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
   {p}voice [name]           show the current voices, or set one
   {p}all                    say the last reply again, all of it
   {p}tldr                   ...as a short summary: what was done, and the result
-  {p}brief                  ...its first sentence and closing question
+  {p}brief                  ...its first sentence, then every question it asks
   {p}vol [0-10]             how loud: 5 is normal, 10 twice as loud, 0 silent
   {p}help                   this
 

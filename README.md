@@ -10,8 +10,8 @@ and speaks it in that language's voice. `/robot-voice:use`, `:voice`, `:all`,
 
 | Agent | How it hooks in | commands |
 |---|---|---|
-| **Claude Code** | plugin: `Stop` hook | `/robot-voice:<command>`, answered by a hook |
-| **Hermes Agent** | plugin: `post_llm_call` hook | `/robot:<command>`, native |
+| **Claude Code** | plugin: `Stop` + `AskUserQuestion` hooks | `/robot-voice:<command>`, answered by a hook |
+| **Hermes Agent** | plugin: `post_llm_call` + `clarify` hooks | `/robot:<command>`, native |
 | **pi** | package: `agent_end` + `agent_settled` | `/robot:<command>`, native |
 | anything else | `robot-voice` CLI | `robot-voice <command>` |
 
@@ -150,7 +150,7 @@ before the colon, Hermes and pi use `robot`:
 | `/robot-voice:voice [name]` | `/robot:voice [name]` | show the current voices, or set one |
 | `/robot-voice:all` | `/robot:all` | say the last reply again, all of it |
 | `/robot-voice:tldr` | `/robot:tldr` | ...as a real TL;DR: 3 to 5 sentences on what was done and the result, never cut off (Gemini; without a key, a local summary) |
-| `/robot-voice:brief` | `/robot:brief` | ...its first sentence and closing question |
+| `/robot-voice:brief` | `/robot:brief` | ...its first sentence, then every question it asks |
 | `/robot-voice:vol 7` | `/robot:vol 7` | how loud, 0 to 10: 5 is normal, 10 twice as loud, 0 silent |
 | `/robot-voice:help` | `/robot:help` | these, in a few lines |
 
@@ -201,11 +201,26 @@ Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 Measured on a typical reply (137 chars, ~9s of audio) with
 `gemini-2.5-flash-preview-tts`: about $0.0023 per reply. There is a free tier.
 
+## Questions are always asked
+
+When a reply asks you something, the voice asks it too, in every mode. Every
+question is found in the reply (each sentence ending in "?", inside lists
+too, and the items of a list introduced as questions, like "Before I start, I
+need to know:") and spoken word for word after the rest. Only the statements
+around them get shorter: `brief` caps its first sentence, `prose` its body, and
+the `:tldr`/`smart` summarizer never sees the questions, so it can't rephrase
+or drop them.
+
+Questions asked through an agent's question tool are spoken too, the moment
+they appear, with their options: Claude Code's `AskUserQuestion` (a
+`PreToolUse` hook, since the turn pauses without ending) and Hermes' `clarify`
+(a `pre_tool_call` hook). "Which database? Options: Postgres or SQLite."
+
 ## Modes
 
 | mode | what you hear |
 |---|---|
-| `brief` | first sentence plus any closing question, ~220 chars (default) |
+| `brief` | first sentence (~220 chars), then every question the reply asks (default) |
 | `prose` | the whole reply, cleaned, ~1200 chars |
 | `smart` | a summary of each reply, as `:tldr` gives: 3 to 5 sentences from a cheap Gemini call, or a local summary without one |
 | `off` | nothing (replies are still remembered for `repeat`) |

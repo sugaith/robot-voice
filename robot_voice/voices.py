@@ -45,7 +45,8 @@ PT_WORDS = frozenset(
     "o e quer pronto feito certo beleza que não é de da dos das uma para com os "
     "você está isso isto mas se na nos nas por pra também já ainda quando como "
     "sim foi são vai tem ele ela eu ao aos à mais muito seu sua esse essa este "
-    "esta então agora".split())
+    "esta então agora qual quais quem onde porque devo posso podemos prefere "
+    "precisa precisamos usar fazer deve deveria".split())
 EN_WORDS = frozenset(
     "done okay sure yes the is and to of a you it that this for with are not be "
     "on in can but i was will have has what if does an at by from or so all just "

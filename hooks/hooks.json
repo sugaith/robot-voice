@@ -32,6 +32,23 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/claude.py",
+              "ask"
+            ],
+            "async": true,
+            "timeout": 90
+          }
+        ]
+      }
     ]
   }
 }
