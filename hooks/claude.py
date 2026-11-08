@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the Claude Code hooks: claude.py stop|command."""
+"""Entry point for the Claude Code hooks: claude.py stop|start|ask|command."""
 import os
 import sys
 

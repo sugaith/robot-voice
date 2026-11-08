@@ -20,6 +20,7 @@ const COMMANDS: Record<string, string> = {
 	tldr: "Robot voice: a short summary of the last reply (3-5 sentences)",
 	brief: "Robot voice: the last reply's first sentence again",
 	vol: "Robot voice: how loud, 0 to 10 (5 is normal, 10 twice as loud)",
+	style: "Robot voice: delivery style (Gemini) -- serious-tech, desperate-doomer, sarcastic-ahole, own words, off",
 	help: "Robot voice: the commands",
 };
 
@@ -96,7 +97,7 @@ export default function (pi: ExtensionAPI) {
 		speak(text, session(ctx));
 	});
 
-	// /robot:use, :voice, :all, :tldr, :brief, :help -- the same commands as
+	// /robot:use, :voice, :all, :tldr, :brief, :vol, :style, :help -- the same commands as
 	// Claude Code's /robot-voice:<name>. Each runs locally, without the model.
 	for (const [name, description] of Object.entries(COMMANDS)) {
 		pi.registerCommand(`robot:${name}`, {

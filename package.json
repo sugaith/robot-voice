@@ -1,7 +1,7 @@
 {
   "name": "robot-voice",
   "version": "0.8.0",
-  "description": "Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot:use, :voice, :all, :tldr, :brief and :help.",
+  "description": "Speaks each finished reply out loud in English and Portuguese (Gemini, local sano/Kokoro, or macOS say), with /robot:use, :voice, :all, :tldr, :brief, :vol, :style and :help.",
   "keywords": [
     "pi-package",
     "tts",

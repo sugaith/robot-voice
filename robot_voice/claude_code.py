@@ -1,12 +1,14 @@
-"""Claude Code adapter: three hooks, wired up in hooks/hooks.json.
+"""Claude Code adapter: four hooks, wired up in hooks/hooks.json.
 
 stop     -- Stop hook. Claude Code hands over the finished reply as
             `last_assistant_message`, so there is no transcript to parse and
             no race with the writer.
+start    -- SessionStart hook: tells the model it may write reactions
+            (<laugh>, <sigh>) that the Gemini voices perform.
 ask      -- PreToolUse hook on AskUserQuestion: questions asked through the
             tool pause the turn instead of ending it, so they're spoken here.
 command  -- UserPromptExpansion hook on /robot-voice:use, :voice, :all,
-            :tldr, :brief and :help. A valid command runs right
+            :tldr, :brief, :vol, :style and :help. A valid command runs right
             here and its output replaces the model turn: no tokens, no
             interpretation. Anything else ("talk slower please", "mode loud")
             expands into the skill as usual and the model maps it.
@@ -31,6 +33,13 @@ def stop(payload):
         return
     engine.handle_reply(payload.get("last_assistant_message") or "",
                         _session(payload))
+
+
+def start(payload):
+    """SessionStart: context for the model, so its replies carry reactions."""
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                   "additionalContext": "Your replies are spoken out loud by "
+                                                        "robot-voice. " + engine.REACTIONS_PROMPT}}
 
 
 def ask(payload):
@@ -65,6 +74,8 @@ def main(argv):
     try:
         if argv[:1] == ["stop"]:
             stop(payload)
+        elif argv[:1] == ["start"]:
+            print(json.dumps(start(payload)))
         elif argv[:1] == ["ask"]:
             ask(payload)
         elif argv[:1] == ["command"]:

@@ -185,7 +185,7 @@ class Hermes(Base):
         self.assertEqual(set(registered) - {"prompt"},
                          {"robot:" + n for n in ctl.SHORTCUTS})
         self.assertIn("bin/robot-voice", registered["prompt"])
-        self.assertLessEqual(len(registered["prompt"]), 900)
+        self.assertLessEqual(len(registered["prompt"]), 1300)
 
     def test_repeat_uses_the_session_that_spoke_last(self):
         hermes.on_turn(assistant_response="First. Then more.", session_id="h3",
@@ -411,7 +411,68 @@ class Scopes(Base):
     def test_hermes_prompt_names_its_session(self):
         text = hermes.prompt_section({"session_id": "abc123"})
         self.assertIn("--session hermes:abc123", text)
-        self.assertLessEqual(len(text), 1100)
+        self.assertLessEqual(len(text), 1600)
+
+
+class Reactions(Base):
+    REPLY = "Pronto <sigh>, funcionou de primeira. <laugh> Quer que eu abra o PR?"
+
+    def gemini_body(self, cfg, text):
+        sent = []
+        saved, saved_write = engine.gemini_call, engine.write_wav
+        engine.gemini_call = lambda model, body, cfg, timeout=60: sent.append(body) or {
+            "candidates": [{"content": {"parts": [{"inlineData": {
+                "data": "AAAAAA==", "mimeType": "audio/L16;rate=24000"}}]}}]}
+        engine.write_wav = lambda *a, **k: None
+        try:
+            engine.speak_gemini(text, cfg, "Tavi", os.path.join(HOME, "x.wav"))
+        finally:
+            engine.gemini_call, engine.write_wav = saved, saved_write
+        return sent[0]["contents"][0]["parts"][0]
+
+    def test_engines_that_cant_perform_them_never_hear_them(self):
+        engine.handle_reply(self.REPLY, "r1")
+        said = spoken()[-1][2]
+        self.assertNotIn("<", said)
+        self.assertIn("Pronto, funcionou de primeira.", said)
+        self.assertIn("Quer que eu abra o PR?", said)
+
+    def test_gemini_38_gets_them_and_takes_style_as_metadata(self):
+        cfg = dict(engine.load_config(), backend="gemini",
+                   gemini_model="gemini-3.8-flash-lite-tts", style="sarcastic-ahole")
+        line = engine.shape(self.REPLY, cfg, "prose")
+        self.assertEqual(engine.speakable(line, "gemini", cfg), line)
+        part = self.gemini_body(cfg, line)
+        self.assertEqual(part["text"], line)
+        self.assertEqual(part["speech_metadata"]["style"], engine.STYLES["sarcastic-ahole"])
+
+    def test_older_gemini_reads_direction_from_the_text(self):
+        cfg = dict(engine.load_config(), backend="gemini", style="serious-tech")
+        self.assertNotIn("<", engine.speakable(self.REPLY, "gemini", cfg))
+        part = self.gemini_body(cfg, "Feito.")
+        self.assertNotIn("speech_metadata", part)
+        self.assertTrue(part["text"].startswith("Say this in this style -- Serious"))
+        self.assertTrue(part["text"].endswith(": Feito."))
+
+    def test_only_known_reactions_are_dropped(self):
+        self.assertEqual(engine.strip_reactions("Use Array<string> here <breath> now."),
+                         "Use Array<string> here now.")
+
+    def test_style_presets_list_set_and_clear(self):
+        self.assertIn("desperate-doomer", ctl.run(["style"]))
+        ctl.run(["style", "Desperate-Doomer"])
+        self.assertEqual(engine.load_config()["style"], "desperate-doomer")
+        self.assertIn("* desperate-doomer", ctl.run(["style"]))
+        ctl.run(["style", "whispered", "and", "tired"])
+        self.assertEqual(engine.style_text(engine.load_config()), "whispered and tired")
+        ctl.run(["style", "off"])
+        self.assertEqual(engine.load_config()["style"], "")
+
+    def test_agents_are_told_to_write_them(self):
+        self.assertIn("<laugh>", hermes.prompt_section({"session_id": "s"}))
+        ctx = claude_code.start({})["hookSpecificOutput"]
+        self.assertEqual(ctx["hookEventName"], "SessionStart")
+        self.assertIn("sarcastic-ahole", ctx["additionalContext"])
 
 
 class Queue(unittest.TestCase):

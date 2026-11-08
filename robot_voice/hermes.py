@@ -19,9 +19,11 @@ DESCRIPTIONS = {
     "tldr": "Robot voice: a short summary of the last reply (3-5 sentences)",
     "brief": "Robot voice: the last reply's first sentence again",
     "vol": "Robot voice: how loud, 0 to 10 (5 is normal)",
+    "style": "Robot voice: delivery style (Gemini), a preset or own words",
     "help": "Robot voice: the commands",
 }
-ARGS_HINTS = {"use": "<engine> [voice] | <voice>", "voice": "[name]", "vol": "[0-10]"}
+ARGS_HINTS = {"use": "<engine> [voice] | <voice>", "voice": "[name]", "vol": "[0-10]",
+              "style": "[serious-tech|desperate-doomer|sarcastic-ahole|<words>|off]"}
 
 # Hermes has no skill index for plugins, so the agent learns about its voice here.
 PROMPT = (
@@ -88,7 +90,8 @@ def command(name):
 
 def prompt_section(info=None):
     sid = (info or {}).get("session_id") or "default"
-    return PROMPT % (os.path.join(engine.ROOT, "bin", "robot-voice"), "hermes:" + sid)
+    return (PROMPT % (os.path.join(engine.ROOT, "bin", "robot-voice"), "hermes:" + sid)
+            + " " + engine.REACTIONS_PROMPT)
 
 
 def register(ctx):
@@ -97,4 +100,4 @@ def register(ctx):
     for name, desc in DESCRIPTIONS.items():
         ctx.register_command(PREFIX.lstrip("/") + name, handler=command(name),
                              description=desc, args_hint=ARGS_HINTS.get(name, ""))
-    ctx.register_system_prompt_section("robot-voice", prompt_section, max_chars=1100)
+    ctx.register_system_prompt_section("robot-voice", prompt_section, max_chars=1600)

@@ -20,8 +20,8 @@ Report its output verbatim. `help all` lists every command. Changes apply to
 this session only; put `agent` or `global` right after the command
 (`robot-voice use global kokoro`) when the user wants every pi session, or
 every agent, to change. The user also
-has `/robot:use`, `/robot:voice`, `/robot:all`, `/robot:tldr`, `/robot:brief`
-and `/robot:help`: exact commands run instantly without you, and
+has `/robot:use`, `/robot:voice`, `/robot:all`, `/robot:tldr`, `/robot:brief`,
+`/robot:vol`, `/robot:style` and `/robot:help`: exact commands run instantly without you, and
 `/robot:use` in plain words reaches you here.
 
 ## Mapping what the user says
@@ -44,7 +44,8 @@ and `/robot:help`: exact commands run instantly without you, and
 | "surprise me", "a different voice each time" | `random on` |
 | "always speak Portuguese" / "English" | `lang pt` / `lang en` |
 | "detect the language" | `lang auto` |
-| "sound calmer/excited/etc" (Gemini) | `style Say it <adjective>:` |
+| "sound calmer/excited/etc" (Gemini) | `style <own words>`, e.g. `style calm and low-key` |
+| "serious", "doomer", "sarcastic" voice (Gemini) | `style serious-tech`, `style desperate-doomer`, `style sarcastic-ahole` (`style` lists, `style off` clears) |
 | "test it" | `test` |
 | "repeat", "say that again", "I missed that" | `repeat` |
 | "read the whole thing again", "all of it" | `repeat all` |

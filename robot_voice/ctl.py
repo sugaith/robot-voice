@@ -35,7 +35,8 @@ USAGE = """usage: robot-voice <command>
   voices                   list the active engine's voices, per language
   random [on|off]          a random voice for every reply
   model <id>               the Gemini TTS model
-  style <text>             Gemini delivery style, e.g. "Say it calm:" ("" clears)
+  style [name|text]        Gemini delivery: serious-tech, desperate-doomer,
+                           sarcastic-ahole, or your own words (off clears)
   test [text]              speak a sample now
   stop                     stop playback
   reset                    restore defaults
@@ -94,6 +95,7 @@ HELP = """robot-voice speaks every reply out loud (pt/en detected per reply).
   {p}tldr                   ...as a short summary: what was done, and the result
   {p}brief                  ...its first sentence, then every question it asks
   {p}vol [0-10]             how loud: 5 is normal, 10 twice as loud, 0 silent
+  {p}style [name|words]     delivery (Gemini): serious-tech, desperate-doomer, sarcastic-ahole, own words, off
   {p}help                   this
 
 Changes stay in this session. Add `agent` (every session of this agent) or
@@ -115,6 +117,7 @@ SHORTCUTS = {
     "tldr": ["repeat", "smart"],
     "brief": ["repeat", "brief"],
     "vol": ["volume"],
+    "style": ["style"],
     "help": ["help"],
 }
 
@@ -232,7 +235,13 @@ def run(argv, detach=False, session=None):
             raise CtlError("need a model id, e.g. gemini-2.5-flash-preview-tts")
         cfg["gemini_model"] = arg
     elif cmd == "style":
-        cfg["style"] = (arg + " ") if arg else ""
+        if not rest:
+            return list_styles(cfg)
+        name = arg.lower()
+        if name in ("", "off", "none"):
+            cfg["style"] = ""
+        else:
+            cfg["style"] = name if name in engine.STYLES else arg + " "
     elif cmd == "reset":
         engine.save_layer(scope, session, {}, reset=True)
         return status(engine.config_for(session), session)
@@ -415,6 +424,16 @@ def list_voices(cfg):
         out.append("%s: %s" % (lang, " ".join(marked) or "(none installed)"))
     out.append("(* = selected)")
     return "\n".join(out)
+
+
+def list_styles(cfg):
+    current = (cfg.get("style") or "").strip()
+    lines = ["%s %s  %s" % ("*" if name == current else " ", name, text)
+             for name, text in engine.STYLES.items()]
+    if current and current not in engine.STYLES:
+        lines.append("* " + current)
+    lines.append("(* = selected; `style off` clears, `style <own words>` sets your own)")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------- repeat

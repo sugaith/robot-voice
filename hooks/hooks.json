@@ -19,7 +19,7 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^robot-voice:(use|voice|all|tldr|brief|vol|help)$",
+        "matcher": "^robot-voice:(use|voice|all|tldr|brief|vol|style|help)$",
         "hooks": [
           {
             "type": "command",
@@ -46,6 +46,21 @@
             ],
             "async": true,
             "timeout": 90
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/claude.py",
+              "start"
+            ],
+            "timeout": 10
           }
         ]
       }

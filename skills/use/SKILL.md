@@ -42,7 +42,8 @@ kokoro`); for every agent (Claude, Hermes, pi), put `global`.
 | "shut up" (mid-playback) | `stop` |
 | "read the whole thing" / "just the gist" | `mode prose` / `mode brief` |
 | "always speak Portuguese" / "English" / "detect it" | `lang pt` / `lang en` / `lang auto` |
-| "sound calmer/excited/etc" (Gemini) | `style Say it <adjective>:` |
+| "sound calmer/excited/etc" (Gemini) | `style <own words>`, e.g. `style calm and low-key` |
+| "serious", "doomer", "sarcastic" voice (Gemini) | `style serious-tech`, `style desperate-doomer`, `style sarcastic-ahole` (`style` lists, `style off` clears) |
 | "say that again" / "all of it" / "in short" | `repeat` / `repeat all` / `repeat smart` |
 | "louder" / "quieter" / "too loud" | `vol <0-10>` (5 is normal; check `vol` first) |
 | "slower" | `repeat slow` |

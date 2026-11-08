@@ -139,7 +139,7 @@ your voice carries over. Remove the old wiring or every reply is spoken twice:
 
 ## Commands
 
-The same six commands in every agent. Claude Code puts the plugin's name
+The same commands in every agent. Claude Code puts the plugin's name
 before the colon, Hermes and pi use `robot`:
 
 | Claude Code | Hermes, pi | does |
@@ -152,6 +152,7 @@ before the colon, Hermes and pi use `robot`:
 | `/robot-voice:tldr` | `/robot:tldr` | ...as a real TL;DR: 3 to 5 sentences on what was done and the result, never cut off (Gemini; without a key, a local summary) |
 | `/robot-voice:brief` | `/robot:brief` | ...its first sentence, then every question it asks |
 | `/robot-voice:vol 7` | `/robot:vol 7` | how loud, 0 to 10: 5 is normal, 10 twice as loud, 0 silent |
+| `/robot-voice:style sarcastic-ahole` | `/robot:style sarcastic-ahole` | how it's delivered (Gemini): `serious-tech`, `desperate-doomer`, `sarcastic-ahole`, your own words, or `off`; bare, it lists them |
 | `/robot-voice:help` | `/robot:help` | these, in a few lines |
 
 Exact commands never reach the model: they run locally and show their answer in
@@ -175,7 +176,7 @@ robot-voice voice en Zarvox           # set a voice for one language explicitly
 robot-voice voices                    # the active engine's voices, per language
 robot-voice random on|off             # a random voice for every reply
 robot-voice model <id>                # Gemini TTS model
-robot-voice style Say it calm:        # Gemini delivery direction ("" clears)
+robot-voice style serious-tech        # Gemini delivery: a preset or your own words (off clears)
 robot-voice test [text]
 robot-voice stop                      # kill playback
 robot-voice reset
@@ -184,6 +185,19 @@ robot-voice say hello there           # arbitrary words
 robot-voice key                       # store a Gemini key in the keychain
 robot-voice help all                  # every command
 ```
+
+## Reactions and styles (Gemini)
+
+The agents are told to put a reaction or two in their replies, like `<laugh>`,
+`<sigh>`, `<gasp>` or `<short pause>`, written in English even in Portuguese.
+Gemini 3.8 and later TTS models perform them where they sit; every other
+engine, and older Gemini models, drop them before speaking.
+
+`style` directs how a whole line is delivered. Three presets ship:
+`serious-tech`, `desperate-doomer` and `sarcastic-ahole`; anything else is
+taken as your own words. Bare `style` lists them. On Gemini 3.8 the style goes
+in `speech_metadata.style`, beside the text, because those models speak every
+word of the text; older models get it as a prefix ("Say this in this style").
 
 ## The Gemini key
 
@@ -260,7 +274,7 @@ robot_voice/
   engine.py       cleanup, shaping, the engine chain, playback, per-session history
   voices.py       language detection, voice catalogs, per-language and random picks
   local_tts.py    sano and Kokoro, run inside the local Python environment
-  ctl.py          the commands and the six slash-command shortcuts, as text for any surface
+  ctl.py          the commands and the slash-command shortcuts, as text for any surface
   keys.py         where the Gemini key comes from
   claude_code.py  Claude Code hooks: stop, command
   hermes.py       Hermes hook and slash command
